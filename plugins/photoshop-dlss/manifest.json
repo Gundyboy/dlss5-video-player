@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "id": "com.reality3d.dlssneuralmix",
   "name": "DLSS Neural Mix",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "main": "index.html",
   "host": { "app": "PS", "minVersion": "25.0.0" },
   "icons": [
@@ -23,7 +23,7 @@
     }
   ],
   "requiredPermissions": {
-    "network": { "domains": ["http://127.0.0.1:47837"] },
+    "network": { "domains": ["http://localhost:47837"] },
     "launchProcess": { "extensions": [".exe"] }
   }
 }

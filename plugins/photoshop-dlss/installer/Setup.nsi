@@ -7,7 +7,7 @@ Unicode True
 !include "FileFunc.nsh"
 
 !define PRODUCT "DLSS Neural Mix"
-!define VERSION "0.2.2"
+!define VERSION "0.2.3"
 !define STAGE "..\dist\setup"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\DLSSNeuralMix"
 
@@ -18,7 +18,7 @@ RequestExecutionLevel user
 ShowInstDetails show
 ShowUninstDetails show
 SetCompressor /SOLID lzma
-VIProductVersion "0.2.2.0"
+VIProductVersion "0.2.3.0"
 VIAddVersionKey "ProductName" "${PRODUCT}"
 VIAddVersionKey "FileDescription" "${PRODUCT} setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
@@ -47,6 +47,7 @@ Function .onInit
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
   File /oname=Install.ps1 "${STAGE}\Install.ps1"
+  File /oname=Upgrade.ps1 "${STAGE}\Upgrade.ps1"
   File /oname=DLSS-Neural-Mix.ccx "${STAGE}\DLSS-Neural-Mix.ccx"
   SetOutPath "$PLUGINSDIR\payload"
   File "${STAGE}\payload\DLSSPhotoshopNeural.exe"

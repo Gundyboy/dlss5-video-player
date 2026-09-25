@@ -27,9 +27,11 @@ configuration, with the model at the layer's native resolution. Adobe Photoshop
 x64 runtime are required. Adobe may ask for plugin permission when the panel
 starts its local bridge.
 
-When upgrading from an older plugin version, close any running
-`DLSSPhotoshopBridge.exe` process before starting Photoshop again. The panel will
-identify an old bridge if one is still using the local port.
+Setup stops the previous idle renderer bridge. After Adobe installs and setup
+verifies the new plugin, setup archives older copies outside Adobe's plugin
+search folder. Photoshop can otherwise keep choosing v0.2.0 even after a restart.
+Backups are retained in `%LOCALAPPDATA%\DLSSNeuralMix\PluginBackups`.
+The panel header and activity log show v0.2.3 after this update.
 
 To validate the selected folder without installing, run
 `Install.ps1 -ValidateOnly -PlayerExePath <path>`. Uninstall DLSS Neural Mix

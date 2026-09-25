@@ -1,8 +1,9 @@
 const { app, core, action, imaging, constants } = require("photoshop");
 const { entrypoints, shell, storage } = require("uxp");
 
-const endpoint = "http://127.0.0.1:47837";
-const panelVersion = "0.2.2";
+// UXP's manifest allowlist rejects numeric loopback addresses in Photoshop.
+const endpoint = "http://localhost:47837";
+const panelVersion = "0.2.3";
 const fs = storage.localFileSystem;
 const slider = document.getElementById("mix");
 const number = document.getElementById("mixNumber");
@@ -116,7 +117,11 @@ async function bridgeVersion() {
   try {
     const response = await fetch(endpoint + "/health");
     return response.ok ? Number(response.headers.get("X-DLSS-Bridge")) || 0 : 0;
-  } catch (_) { return 0; }
+  } catch (error) {
+    if (/permission denied|manifest entry/i.test(String(error)))
+      throw new Error("Photoshop blocked the local renderer connection. Reinstall the latest DLSS Neural Mix plugin, then restart Photoshop.");
+    return 0;
+  }
 }
 
 async function ensureBridge() {
@@ -177,7 +182,7 @@ async function captureSelectedLayer(documentId, layerId) {
       if (width < 64 || height < 64)
         throw new Error("DLSS Neural Rendering needs at least 64 × 64 pixels in the selected layer.");
       if (width > 8192 || height > 8192)
-        throw new Error("DLSS Neural Rendering supports up to 8192 × 8192 pixels. Resize the selected layer first.");
+        throw new Error(`The selected layer is ${width} × ${height} pixels. DLSS Neural Rendering supports up to 8192 pixels per side. Resize the selected layer first.`);
       const pixelCount = width * height;
       if (!pixelCount || pixelCount > 64000000)
         throw new Error("The selected layer is empty or exceeds 64 megapixels.");
@@ -226,7 +231,7 @@ async function insertResult(documentId, sourceId, pixels, width, height, bounds,
         targetBounds: { left: bounds.left, top: bounds.top },
         replace: true
       });
-      layer.move(source, constants.ElementPlacement.PLACEBEFORE);
+      await layer.move(source, constants.ElementPlacement.PLACEBEFORE);
       await convertActiveToSmartObject(current, layer.id, name);
     } finally {
       imageData.dispose();

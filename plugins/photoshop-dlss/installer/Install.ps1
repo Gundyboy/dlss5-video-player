@@ -6,6 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 try {
+. (Join-Path $PSScriptRoot 'Upgrade.ps1')
 if (Get-Process -Name Photoshop -ErrorAction SilentlyContinue) {
     throw 'Photoshop is still running. Save your work and close Photoshop before continuing; an open panel keeps the previous plugin code loaded.'
 }
@@ -31,6 +32,7 @@ $upia = Join-Path $programFiles64 'Common Files\Adobe\Adobe Desktop Common\Remot
 foreach ($item in @($package, $runner, $worker, $reshadeSettings, $reshadePreset, $lockPath, $upia)) {
     if (-not (Test-Path -LiteralPath $item -PathType Leaf)) { throw "Installer file missing: $item" }
 }
+$identity = Get-DlssPackageIdentity -Package $package
 if (-not (Test-Path -LiteralPath $RuntimePath -PathType Container)) {
     throw "DLSS Video Player folder not found: $RuntimePath. Pass -RuntimePath <folder>."
 }
@@ -60,6 +62,7 @@ if (-not (Test-Path -LiteralPath $dotnet -PathType Leaf) -or
 
 Write-Output "Verified neural runtime: $source"
 if ($ValidateOnly) { Write-Output 'Validation passed; no files were installed.'; exit 0 }
+Stop-DlssBridgeForUpgrade
 
 $installRoot = Join-Path $env:LOCALAPPDATA 'DLSSNeuralMix'
 $renderer = Join-Path $installRoot 'Renderer'
@@ -89,7 +92,9 @@ New-Item -ItemType Directory -Path $bridgeSettings -Force | Out-Null
 
 & $upia /install $package
 if ($LASTEXITCODE -ne 0) { throw "Adobe UPIA installation failed with exit code $LASTEXITCODE." }
-Write-Output 'DLSS Neural Mix installed. Start Photoshop, then open Plugins > DLSS Neural Mix. Close any old DLSSPhotoshopBridge.exe process if the panel asks.'
+Move-ObsoleteDlssPlugins -ExternalRoot (Join-Path $env:APPDATA 'Adobe\UXP\Plugins\External') `
+    -BackupRoot (Join-Path $installRoot 'PluginBackups') -Identity $identity
+Write-Output "DLSS Neural Mix v$($identity.Version) installed. Start Photoshop, then open Plugins > DLSS Neural Mix."
 } catch {
     Write-Output ('ERROR: ' + $_.Exception.Message)
     exit 1

@@ -49,7 +49,7 @@ foreach ($name in @('DLSSPhotoshopBridge.exe', 'DLSSPhotoshopBridge.dll',
         'DLSSPhotoshopBridge.deps.json', 'DLSSPhotoshopBridge.runtimeconfig.json')) {
     Copy-Item -LiteralPath (Join-Path $bridgeBuild $name) -Destination (Join-Path $uxp "native\$name") -Force
 }
-foreach ($name in @('Install.ps1', 'Install.cmd', 'Uninstall.ps1', 'README.md')) {
+foreach ($name in @('Install.ps1', 'Upgrade.ps1', 'Install.cmd', 'Uninstall.ps1', 'README.md')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $setup $name) -Force
 }
 Copy-Item -LiteralPath $RunnerPath -Destination (Join-Path $setup 'payload\DLSSPhotoshopNeural.exe') -Force

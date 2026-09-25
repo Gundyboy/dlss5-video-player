@@ -81,6 +81,7 @@ const context = {
     createElement() { return { dataset: {}, textContent: "" }; }
   },
   async fetch(url) {
+    assert.ok(url.startsWith("http://localhost:47837/"), "UXP needs the allowlisted localhost hostname");
     if (url.endsWith("/health"))
       return { ok: true, headers: { get() { return "2"; } } };
     if (url.endsWith("/render")) {
@@ -99,7 +100,7 @@ const context = {
 };
 
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "panel.js"), "utf8"), context);
-controls.get("process").click().then(() => {
+controls.get("process").click().then(async () => {
   assert.equal(captures, 1);
   assert.equal(renders, 1);
   assert.equal(insertedPixels[0], 150, "50% Mix should blend source and neural pixels");
@@ -107,5 +108,11 @@ controls.get("process").click().then(() => {
   assert.equal(outputDisposed, true);
   assert.equal(document.activeLayers[0].name, "DLSS - 50% Mix");
   assert.equal(controls.get("status").dataset.state, "done");
-  console.log("Modal capture, non-modal render, and Smart Object insertion passed.");
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
+  assert.deepEqual(manifest.requiredPermissions.network.domains, ["http://localhost:47837"]);
+  context.fetch = async () => { throw new Error("Permission denied to the url. Manifest entry not found."); };
+  await assert.rejects(context.ensureBridge(), /Photoshop blocked the local renderer connection/);
+  context.fetch = async () => { throw new Error("Connection refused"); };
+  assert.equal(await context.bridgeVersion(), 0, "An offline bridge should trigger startup");
+  console.log("Modal capture, non-modal render, Smart Object insertion, and bridge permission handling passed.");
 }).catch(error => { console.error(error); process.exitCode = 1; });

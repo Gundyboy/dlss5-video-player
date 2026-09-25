@@ -21,7 +21,9 @@ for the bridge to decode. Photoshop computes Mix and creates the Smart Object.
 The video player's UI, playback, upscaling, frame generation, and multi-stage
 export are not run or installed with this plugin.
 
-The bridge listens on `127.0.0.1:47837`. Image pixels stay on the local machine.
+The bridge listens on `127.0.0.1:47837`; the panel connects using `localhost`
+because Photoshop rejects numeric IP addresses in its UXP permission allowlist.
+Image pixels stay on the local machine.
 Its work files and log live under `%LOCALAPPDATA%\DLSSPhotoshopBridge`; each
 finished job's work files are removed. It remembers the last neural RGB frame,
 so changing Mix on the same unchanged layer does not invoke the model again.
@@ -50,10 +52,22 @@ The bridge needs the local .NET Core 3.1 x64 runtime. The bridge log is
 `%LOCALAPPDATA%\DLSSPhotoshopBridge\bridge.log`; the worker's own log stays
 beside `NeuralWorker.exe`.
 
+Run `node tests/modal-flow.test.js` and `powershell -File tests/upgrade.test.ps1`
+from this plugin folder for the modal and installer regressions. For a live
+integration check, copy the panel into an isolated development plugin with a
+different plugin ID, include `tests/photoshop-live.js` after `panel.js`, and load
+it through Adobe UXP Developer Tool. It tests 50%, 100%, and 0% in a temporary
+512 × 512 document, verifies Smart Object names and types, then closes only that
+document. Inspect `globalThis.__dlssDiagnostic` in the development console for
+the result. This check uses the real local GPU renderer and may prompt to open
+the bridge on first use. Never include this test script in a release package.
+
 ## Windows installer
 
 Save your work and close Photoshop before running the installer; an open panel
-keeps the previous plugin code loaded. Then run
+keeps the previous plugin code loaded. Setup verifies the new plugin, archives
+obsolete versions outside Adobe's plugin search folder, and stops the previous
+idle bridge. Then run
 `dist/DLSS-Neural-Mix-Setup-win64.exe` and select the existing unpacked
 video player's `DLSSVideoPlayer.exe`. Setup uses that folder only to verify and
 copy the separately licensed neural runtime, FFmpeg, and FFprobe. It installs
