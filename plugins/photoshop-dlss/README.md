@@ -41,8 +41,8 @@ it has not been packaged or signed for Adobe Marketplace distribution.
 
 ## Windows installer
 
-The installer bundle is `dist/DLSS-Neural-Mix-Setup-win64.zip`. Extract it, then
-run `Install.cmd`. It checks the existing neural runtime in the unpacked video
-player, copies it beside the patched player, and installs the Photoshop `.ccx`
-through Adobe's Unified Plugin Installer Agent. See `installer/README.md` for
-requirements and the `-RuntimePath` option.
+Run `dist/DLSS-Neural-Mix-Setup-win64.exe`, choose the existing video player's
+`DLSSVideoPlayer.exe`, and complete the wizard. It verifies the selected neural
+runtime, installs the patched player, and installs the Photoshop `.ccx` through
+Adobe's Unified Plugin Installer Agent. See `installer/README.md` for requirements
+and manual installation.

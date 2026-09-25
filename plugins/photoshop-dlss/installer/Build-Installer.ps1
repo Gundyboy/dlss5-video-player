@@ -1,6 +1,7 @@
 param(
     [string]$PlayerPath = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path 'build-upscaling\Release\DLSSVideoPlayer.exe'),
-    [string]$CcxFile
+    [string]$CcxFile,
+    [string]$NsisCompiler
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,7 +32,7 @@ foreach ($name in @('DLSSPhotoshopBridge.exe', 'DLSSPhotoshopBridge.dll',
         'DLSSPhotoshopBridge.deps.json', 'DLSSPhotoshopBridge.runtimeconfig.json')) {
     Copy-Item -LiteralPath (Join-Path $bridgeBuild $name) -Destination (Join-Path $uxp "native\$name") -Force
 }
-foreach ($name in @('Install.ps1', 'Install.cmd', 'README.md')) {
+foreach ($name in @('Install.ps1', 'Install.cmd', 'Uninstall.ps1', 'README.md')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $setup $name) -Force
 }
 Copy-Item -LiteralPath $PlayerPath -Destination (Join-Path $setup 'payload\DLSSVideoPlayer.exe') -Force
@@ -46,6 +47,26 @@ if ($CcxFile) {
     if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
     Compress-Archive -Path (Join-Path $setup '*') -DestinationPath $zip -Force
     Write-Output "Installer bundle: $zip"
+
+    if (-not $NsisCompiler) {
+        $portable = Join-Path $dist 'nsis-toolchain\tools\Bin\makensis.exe'
+        if (Test-Path -LiteralPath $portable -PathType Leaf) {
+            $NsisCompiler = $portable
+        } else {
+            $command = Get-Command makensis.exe -ErrorAction SilentlyContinue
+            if ($command) { $NsisCompiler = $command.Source }
+        }
+    }
+    if (-not $NsisCompiler -or -not (Test-Path -LiteralPath $NsisCompiler -PathType Leaf)) {
+        throw 'NSIS makensis.exe is required to build the setup EXE. Pass -NsisCompiler <path>.'
+    }
+    $compiler = (Resolve-Path -LiteralPath $NsisCompiler).Path
+    Push-Location $PSScriptRoot
+    try {
+        & $compiler 'Setup.nsi'
+        if ($LASTEXITCODE -ne 0) { throw "NSIS compilation failed with exit code $LASTEXITCODE." }
+    } finally { Pop-Location }
+    Write-Output "Setup executable: $(Join-Path $dist 'DLSS-Neural-Mix-Setup-win64.exe')"
 } else {
     Write-Output "UXP package source: $uxp"
     Write-Output 'In UXP Developer Tool, Add Plugin using uxp\manifest.json, then Package to a .ccx file.'
