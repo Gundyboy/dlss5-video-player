@@ -38,7 +38,7 @@ internal static class Program
             try { context = await listener.GetContextAsync(); }
             catch (Exception error) { Log("Listener stopped: " + error); return 1; }
             // Serve status requests while a render is running. Render itself
-            // remains exclusive because it changes the player's settings.
+            // remains exclusive because it changes the neural runtime settings.
             _ = Task.Run(() => Handle(context));
         }
     }
@@ -49,7 +49,7 @@ internal static class Program
         response.Headers["Access-Control-Allow-Origin"] = "*";
         response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
         response.Headers["Access-Control-Allow-Headers"] = "Content-Type, X-Width, X-Height";
-        response.Headers["X-DLSS-Bridge"] = "1";
+        response.Headers["X-DLSS-Bridge"] = "2";
         try
         {
             var path = context.Request.Url?.AbsolutePath;
@@ -118,26 +118,29 @@ internal static class Program
             return;
         }
 
-        var player = PlayerPath();
-        var ffmpeg = Path.Combine(Path.GetDirectoryName(player)!, "ffmpeg.exe");
-        if (!File.Exists(player) || !File.Exists(ffmpeg))
-            throw new FileNotFoundException("The patched player or ffmpeg.exe is missing from the bridge configuration.");
+        var runner = RunnerPath();
+        var runnerDirectory = Path.GetDirectoryName(runner);
+        if (string.IsNullOrEmpty(runnerDirectory))
+            throw new FileNotFoundException("The Photoshop neural runner is not configured. Reinstall DLSS Neural Mix.");
+        var ffmpeg = Path.Combine(runnerDirectory, "ffmpeg.exe");
+        var ffprobe = Path.Combine(runnerDirectory, "ffprobe.exe");
+        var worker = Path.Combine(runnerDirectory, "neural-runtime", "NeuralWorker.exe");
+        if (!File.Exists(runner) || !File.Exists(ffmpeg) || !File.Exists(ffprobe) || !File.Exists(worker))
+            throw new FileNotFoundException("The Photoshop neural runner, worker, or media tools are missing. Reinstall DLSS Neural Mix.");
         var job = Path.Combine(WorkRoot, "job-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(job);
         try
         {
             var input = Path.Combine(job, "input.bmp");
-            var output = Path.Combine(job, "output.png");
+            var output = Path.Combine(job, "output.mkv");
             var raw = Path.Combine(job, "output.rgb");
             var digest = await WriteBmp(request.InputStream, input, width, height);
             SetPhase("checkingCache");
-            var playerDirectory = Path.GetDirectoryName(player)!;
-            var settingsPath = Path.Combine(playerDirectory, "neural-runtime", "ReShade.ini");
-            var playerSettingsPath = Path.Combine(playerDirectory, "DLSSVideoPlayer.ini");
+            var settingsPath = Path.Combine(runnerDirectory, "neural-runtime", "ReShade.ini");
             string CacheKey() => digest + ":" + width + "x" + height + ":" +
-                File.GetLastWriteTimeUtc(player).Ticks + ":" +
-                File.GetLastWriteTimeUtc(settingsPath).Ticks + ":" +
-                File.GetLastWriteTimeUtc(playerSettingsPath).Ticks;
+                File.GetLastWriteTimeUtc(runner).Ticks + ":" +
+                File.GetLastWriteTimeUtc(worker).Ticks + ":" +
+                File.GetLastWriteTimeUtc(settingsPath).Ticks;
             if (CacheKey() == lastKey && lastRgb != null && File.Exists(lastRgb))
             {
                 SetPhase("sending");
@@ -148,22 +151,22 @@ internal static class Program
 
             Log($"Rendering {width}x{height}");
             SetPhase("rendering");
-            await RunProcess(player,
-                $"--render {Quote(input)} --stages nr --out {Quote(output)} --quiet",
-                Path.GetDirectoryName(player)!);
-            if (!File.Exists(output)) throw new IOException("The player produced no neural PNG.");
+            await RunProcess(runner,
+                $"--input {Quote(input)} --output {Quote(output)} --width {width} --height {height}",
+                runnerDirectory);
+            if (!File.Exists(output)) throw new IOException("The neural worker produced no output frame.");
             SetPhase("decoding");
             await RunProcess(ffmpeg,
                 $"-hide_banner -nostdin -loglevel error -y -i {Quote(output)} -frames:v 1 -f rawvideo -pix_fmt rgb24 {Quote(raw)}",
-                Path.GetDirectoryName(player)!);
+                runnerDirectory);
             if (new FileInfo(raw).Length != inputBytes)
                 throw new IOException("The decoded neural image has the wrong dimensions.");
             var cache = Path.Combine(WorkRoot, "last.rgb");
             if (File.Exists(cache)) File.Delete(cache);
             File.Move(raw, cache);
             lastRgb = cache;
-            // The player may update ReShade.ini during the render. Cache the
-            // resulting settings timestamp so the next identical request hits.
+            // The worker may update ReShade.ini during startup. Cache the
+            // resulting timestamp so an identical Mix change reuses this frame.
             lastKey = CacheKey();
             SetPhase("sending");
             await SendRgb(response, cache, inputBytes);
@@ -259,10 +262,10 @@ internal static class Program
         await response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
     }
 
-    private static string PlayerPath()
+    private static string RunnerPath()
     {
-        // The installer writes a per-user path. Development builds can still
-        // use the config beside this executable.
+        // The installer writes a per-user path. Development builds can use a
+        // config beside this executable instead.
         var configs = new[]
         {
             Path.Combine(WorkRoot, "bridge-config.json"),
@@ -272,9 +275,9 @@ internal static class Program
             if (File.Exists(config))
             {
                 using var document = JsonDocument.Parse(File.ReadAllText(config));
-                return document.RootElement.GetProperty("playerPath").GetString()!;
+                return document.RootElement.GetProperty("runnerPath").GetString()!;
             }
-        return Environment.GetEnvironmentVariable("DLSS_PHOTOSHOP_PLAYER") ?? "";
+        return Environment.GetEnvironmentVariable("DLSS_PHOTOSHOP_RUNNER") ?? "";
     }
 
     private static string Quote(string path) => "\"" + path.Replace("\"", "\\\"") + "\"";

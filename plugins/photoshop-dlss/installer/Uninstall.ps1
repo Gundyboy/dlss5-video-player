@@ -8,11 +8,14 @@ try {
     }
 
     $renderer = Join-Path $env:LOCALAPPDATA 'DLSSNeuralMix\Renderer'
-    $player = Join-Path $renderer 'DLSSVideoPlayer.exe'
+    $runner = Join-Path $renderer 'DLSSPhotoshopNeural.exe'
+    $legacyPlayer = Join-Path $renderer 'DLSSVideoPlayer.exe'
     $config = Join-Path $env:LOCALAPPDATA 'DLSSPhotoshopBridge\bridge-config.json'
     if (Test-Path -LiteralPath $config -PathType Leaf) {
-        $configured = (Get-Content -Raw -LiteralPath $config | ConvertFrom-Json).playerPath
-        if ($configured -ieq $player) { Remove-Item -LiteralPath $config -Force }
+        $configured = Get-Content -Raw -LiteralPath $config | ConvertFrom-Json
+        if ($configured.runnerPath -ieq $runner -or $configured.playerPath -ieq $legacyPlayer) {
+            Remove-Item -LiteralPath $config -Force
+        }
     }
     $lock = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'runtime-lock.json') | ConvertFrom-Json
     foreach ($entry in $lock.entries) {
@@ -21,10 +24,12 @@ try {
         $file = Join-Path (Join-Path $renderer 'neural-runtime') $name
         if (Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file -Force }
     }
-    foreach ($name in @('DLSSVideoPlayer.exe', 'ffmpeg.exe')) {
+    foreach ($name in @('DLSSPhotoshopNeural.exe', 'DLSSVideoPlayer.exe', 'ffmpeg.exe', 'ffprobe.exe')) {
         $file = Join-Path $renderer $name
         if (Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file -Force }
     }
+    $worker = Join-Path $renderer 'neural-runtime\NeuralWorker.exe'
+    if (Test-Path -LiteralPath $worker -PathType Leaf) { Remove-Item -LiteralPath $worker -Force }
     Write-Output 'DLSS Neural Mix removed. Saved settings and cache were retained.'
 } catch {
     Write-Output ('ERROR: ' + $_.Exception.Message)

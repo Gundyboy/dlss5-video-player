@@ -7,7 +7,7 @@ Unicode True
 !include "FileFunc.nsh"
 
 !define PRODUCT "DLSS Neural Mix"
-!define VERSION "0.1.2"
+!define VERSION "0.2.0"
 !define STAGE "..\dist\setup"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\DLSSNeuralMix"
 
@@ -18,7 +18,7 @@ RequestExecutionLevel user
 ShowInstDetails show
 ShowUninstDetails show
 SetCompressor /SOLID lzma
-VIProductVersion "0.1.2.0"
+VIProductVersion "0.2.0.0"
 VIAddVersionKey "ProductName" "${PRODUCT}"
 VIAddVersionKey "FileDescription" "${PRODUCT} setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
@@ -49,7 +49,10 @@ Function .onInit
   File /oname=Install.ps1 "${STAGE}\Install.ps1"
   File /oname=DLSS-Neural-Mix.ccx "${STAGE}\DLSS-Neural-Mix.ccx"
   SetOutPath "$PLUGINSDIR\payload"
-  File "${STAGE}\payload\DLSSVideoPlayer.exe"
+  File "${STAGE}\payload\DLSSPhotoshopNeural.exe"
+  File "${STAGE}\payload\NeuralWorker.exe"
+  File "${STAGE}\payload\ReShade.ini"
+  File "${STAGE}\payload\ReShadePreset.ini"
   File "${STAGE}\payload\runtime-lock.json"
   File "${STAGE}\payload\LICENSE"
   File "${STAGE}\payload\THIRD_PARTY.md"
@@ -61,14 +64,14 @@ Function SelectPlayerPage
   Pop $0
   StrCmp $0 error 0 +2
     Abort
-  ${NSD_CreateLabel} 0 0 100% 24u "Select DLSSVideoPlayer.exe from an unpacked player folder that contains neural-runtime and ffmpeg.exe."
+  ${NSD_CreateLabel} 0 0 100% 24u "Select DLSSVideoPlayer.exe from an unpacked player folder with neural-runtime, ffmpeg.exe and ffprobe.exe."
   Pop $0
   ${NSD_CreateText} 0 32u 79% 13u "$PlayerExe"
   Pop $PlayerInput
   ${NSD_CreateBrowseButton} 81% 32u 19% 13u "Browse..."
   Pop $BrowseButton
   ${NSD_OnClick} $BrowseButton BrowseForPlayer
-  ${NSD_CreateLabel} 0 55u 100% 31u "Setup verifies the selected folder, then installs the patched player and Photoshop plugin for this Windows user."
+  ${NSD_CreateLabel} 0 55u 100% 31u "Setup copies the neural runtime, then installs the small Photoshop runner and plugin for this Windows user."
   Pop $0
   nsDialogs::Show
 FunctionEnd
@@ -125,7 +128,7 @@ installed:
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "Reality3D"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\Renderer\DLSSVideoPlayer.exe"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\Renderer\DLSSPhotoshopNeural.exe"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1

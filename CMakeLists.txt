@@ -379,6 +379,18 @@ dlss_video_player_symbols(NeuralWorker)
 set_target_properties(NeuralWorker PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>/neural-runtime")
 add_dependencies(DLSSVideoPlayer NeuralWorker)
 
+# Photoshop's still-image path uses the existing neural worker directly. It
+# does not link the player's UI, playback or multi-stage export code.
+add_executable(DLSSPhotoshopNeural
+    plugins/photoshop-dlss/runner/NeuralRunner.cpp
+    src/NeuralPreflightProbe.cpp
+    src/GpuPreference.cpp)
+target_link_libraries(DLSSPhotoshopNeural PRIVATE
+    player_media player_render player_neural dlss_video_player_shipped_code)
+dlss_video_player_harden(DLSSPhotoshopNeural)
+dlss_video_player_symbols(DLSSPhotoshopNeural)
+add_dependencies(DLSSPhotoshopNeural NeuralWorker)
+
 add_custom_command(TARGET DLSSVideoPlayer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<IF:$<CONFIG:Debug>,${DLSS_RUNTIME_DEV},${DLSS_RUNTIME_REL}>"

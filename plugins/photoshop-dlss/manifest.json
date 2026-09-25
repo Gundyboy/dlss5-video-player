@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "id": "com.reality3d.dlssneuralmix",
   "name": "DLSS Neural Mix",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "main": "index.html",
   "host": { "app": "PS", "minVersion": "25.0.0" },
   "icons": [
@@ -16,9 +16,9 @@
       "icons": [
         { "width": 23, "height": 23, "path": "icons/plugin.svg", "theme": ["all"] }
       ],
-      "minimumSize": { "width": 260, "height": 300 },
-      "preferredDockedSize": { "width": 320, "height": 410 },
-      "preferredFloatingSize": { "width": 380, "height": 460 }
+      "minimumSize": { "width": 220, "height": 260 },
+      "preferredDockedSize": { "width": 350, "height": 520 },
+      "preferredFloatingSize": { "width": 400, "height": 570 }
     }
   ],
   "requiredPermissions": {

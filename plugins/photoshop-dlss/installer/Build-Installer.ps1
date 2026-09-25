@@ -1,5 +1,6 @@
 param(
-    [string]$PlayerPath = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path 'build-upscaling\Release\DLSSVideoPlayer.exe'),
+    [string]$RunnerPath = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path 'build-upscaling\Release\DLSSPhotoshopNeural.exe'),
+    [string]$WorkerPath = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path 'build-upscaling\Release\neural-runtime\NeuralWorker.exe'),
     [string]$CcxFile,
     [string]$NsisCompiler
 )
@@ -24,8 +25,11 @@ foreach ($stagePath in @($uxp, $setup)) {
     }
 }
 
-if (-not (Test-Path -LiteralPath $PlayerPath -PathType Leaf)) {
-    throw "Build the patched player first: $PlayerPath"
+if (-not (Test-Path -LiteralPath $RunnerPath -PathType Leaf)) {
+    throw "Build the DLSSPhotoshopNeural target first: $RunnerPath"
+}
+if (-not (Test-Path -LiteralPath $WorkerPath -PathType Leaf)) {
+    throw "Build the NeuralWorker target first: $WorkerPath"
 }
 $bridgeBuild = Join-Path $dist 'bridge-build'
 $env:DOTNET_CLI_HOME = Join-Path $plugin '.dotnet'
@@ -33,7 +37,7 @@ $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
 dotnet publish (Join-Path $plugin 'bridge\DLSSPhotoshopBridge.csproj') -c Release -o $bridgeBuild
 if ($LASTEXITCODE -ne 0) { throw 'The bridge build failed.' }
 
-# Only the open-source panel, bridge, and patched player are packaged here.
+# Only the open-source panel, bridge, neural runner and worker are packaged here.
 # The experimental neural runtime and FFmpeg are taken from the user's existing
 # local player folder by Install.ps1; their redistribution terms differ.
 New-Item -ItemType Directory -Path (Join-Path $uxp 'native'), (Join-Path $setup 'payload') -Force | Out-Null
@@ -48,7 +52,10 @@ foreach ($name in @('DLSSPhotoshopBridge.exe', 'DLSSPhotoshopBridge.dll',
 foreach ($name in @('Install.ps1', 'Install.cmd', 'Uninstall.ps1', 'README.md')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $setup $name) -Force
 }
-Copy-Item -LiteralPath $PlayerPath -Destination (Join-Path $setup 'payload\DLSSVideoPlayer.exe') -Force
+Copy-Item -LiteralPath $RunnerPath -Destination (Join-Path $setup 'payload\DLSSPhotoshopNeural.exe') -Force
+Copy-Item -LiteralPath $WorkerPath -Destination (Join-Path $setup 'payload\NeuralWorker.exe') -Force
+Copy-Item -LiteralPath (Join-Path $repo 'packaging\ReShade.ini') -Destination (Join-Path $setup 'payload\ReShade.ini') -Force
+Copy-Item -LiteralPath (Join-Path $repo 'packaging\ReShadePreset.ini') -Destination (Join-Path $setup 'payload\ReShadePreset.ini') -Force
 Copy-Item -LiteralPath (Join-Path $repo 'packaging\runtime-lock.json') -Destination (Join-Path $setup 'payload\runtime-lock.json') -Force
 Copy-Item -LiteralPath (Join-Path $repo 'LICENSE') -Destination (Join-Path $setup 'payload\LICENSE') -Force
 Copy-Item -LiteralPath (Join-Path $repo 'THIRD_PARTY.md') -Destination (Join-Path $setup 'payload\THIRD_PARTY.md') -Force

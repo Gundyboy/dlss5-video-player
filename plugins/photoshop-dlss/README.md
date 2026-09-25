@@ -1,52 +1,57 @@
 # DLSS Neural Mix for Photoshop
 
-A Photoshop 2025/2026 UXP panel that sends the selected layer's cropped pixels
-through this project's neural renderer. It adds a new Smart Object named
-`DLSS - 50% Mix` (using the chosen percentage) immediately above the original.
-The original remains available underneath. Mix is computed in RGB before the
-Smart Object is created, so transparency is retained without stacking alpha
-twice. Zero percent duplicates the layer without launching the renderer.
+The UXP panel applies the neural filter to one selected layer at its native
+pixel size. Mix blends the verified neural frame with the original RGB pixels.
+Photoshop adds the result above the source as a Smart Object named
+`DLSS - 50% Mix` (with the chosen percentage). The source layer and its alpha
+are retained. At 0%, the plugin duplicates the layer without starting a render.
+
+The panel has one strength control, an Apply button, progress, and a bounded
+activity log. It scrolls when docked in a small panel.
+
+## Neural-only path
+
+The Photoshop plugin launches a local .NET bridge, which passes one still image
+to `DLSSPhotoshopNeural.exe`. That small runner calls the repository's isolated
+`NeuralWorker.exe` for the neural stage only. It then returns one verified frame
+for the bridge to decode. Photoshop computes Mix and creates the Smart Object.
+The video player's UI, playback, upscaling, frame generation, and multi-stage
+export are not run or installed with this plugin.
+
+The bridge listens on `127.0.0.1:47837`. Image pixels stay on the local machine.
+Its work files and log live under `%LOCALAPPDATA%\DLSSPhotoshopBridge`; each
+finished job's work files are removed. It remembers the last neural RGB frame,
+so changing Mix on the same unchanged layer does not invoke the model again.
+
+The panel reads RGB pixels at 8 bits per component. A layer must be at least
+64 × 64, no more than 8192 pixels on either side, and at most 64 megapixels.
+Photoshop converts other document modes to sRGB for this pass. The worker
+accepts an opaque still image; the plugin restores the selected layer's alpha
+after neural rendering.
 
 ## Local development
 
-1. Build `DLSSVideoPlayer` from this repository with the complete experimental
-   runtime staged in `build-upscaling/Release/neural-runtime/`.
-2. Run `./plugins/photoshop-dlss/build-local.ps1` from PowerShell. This builds
-   the local companion and writes its player path to `native/bridge-config.json`.
-3. In Adobe UXP Developer Tool, click **Add Plugin**, choose
-   `plugins/photoshop-dlss/manifest.json`, then **Load** it in Photoshop.
-   Open **Plugins > DLSS Neural Mix**.
-4. Select one layer, choose 0–100%, and press **Process selected layer**.
-   Photoshop asks before it launches the local companion for the first time.
+1. Build the `DLSSPhotoshopNeural` CMake target. It builds `NeuralWorker` too.
+   Stage the experimental runtime, FFmpeg, and FFprobe beside the runner as in
+   `build-upscaling/Release/`.
+2. Run `plugins/photoshop-dlss/build-local.ps1`. This builds the bridge and
+   points it at the neural-only runner.
+3. Add `plugins/photoshop-dlss/manifest.json` in Adobe UXP Developer Tool,
+   load it in Photoshop, then open **Plugins > DLSS Neural Mix**.
 
-The panel's Activity log shows each step and the bridge's current render stage.
-During a long render, the status line shows elapsed time and the log adds an
-update every 30 seconds. A failed step stays visible in the log for diagnosis.
+After building the installer staging files, run
+`plugins/photoshop-dlss/runner/Smoke-Test.ps1` for an isolated GPU test. It
+renders one frame from a folder without the full player executable.
 
-The companion listens only on `127.0.0.1:47837` and uses the player's existing
-`--render` image path. Pixel data goes over the local loopback connection; the
-bridge uses temporary files under `%LOCALAPPDATA%\DLSSPhotoshopBridge` and
-removes each completed job's files. It keeps the last neural RGB result while
-running, so changing Mix on identical pixels does not run the model again.
-
-The bridge needs the local .NET Core 3.1 runtime. The Photoshop panel currently
-handles RGB pixels at 8 bits per component, with each layer at least 64 pixels
-wide and tall, no more than 8192 pixels on either side, and no more than 64
-megapixels. Photoshop
-converts other document modes to sRGB for this pass. The selected layer's alpha
-is retained; its pixels are sent to the model as RGB because the current neural
-worker accepts opaque still images. The model processes the layer at its native
-pixel dimensions. No playback upscaling, frame generation, video range work, or
-comparison rendering is requested.
-
-The bridge log is `%LOCALAPPDATA%\DLSSPhotoshopBridge\bridge.log`. The existing
-player and worker logs remain beside their executables. This is a local plugin;
-it has not been packaged or signed for Adobe Marketplace distribution.
+The bridge needs the local .NET Core 3.1 x64 runtime. The bridge log is
+`%LOCALAPPDATA%\DLSSPhotoshopBridge\bridge.log`; the worker's own log stays
+beside `NeuralWorker.exe`.
 
 ## Windows installer
 
-Run `dist/DLSS-Neural-Mix-Setup-win64.exe`, choose the existing video player's
-`DLSSVideoPlayer.exe`, and complete the wizard. It verifies the selected neural
-runtime, installs the patched player, and installs the Photoshop `.ccx` through
-Adobe's Unified Plugin Installer Agent. See `installer/README.md` for requirements
-and manual installation.
+Run `dist/DLSS-Neural-Mix-Setup-win64.exe` and select the existing unpacked
+video player's `DLSSVideoPlayer.exe`. Setup uses that folder only to verify and
+copy the separately licensed neural runtime, FFmpeg, and FFprobe. It installs
+the neural-only runner, worker, bridge, and Photoshop `.ccx`; it does not copy
+or launch the full video player. See `installer/README.md` for requirements and
+manual installation.

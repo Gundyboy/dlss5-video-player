@@ -24,7 +24,7 @@ function appendLog(message, state = "normal") {
   if (followTail) log.scrollTop = log.scrollHeight;
 }
 
-function setStatus(message, state = "normal") {
+function setStatus(message, state = "working") {
   status.textContent = message;
   status.dataset.state = state;
   appendLog(message, state);
@@ -73,7 +73,7 @@ function startProgress() {
     stage: "Waiting for renderer response"
   };
   progress = current;
-  status.dataset.state = "normal";
+  status.dataset.state = "working";
   appendLog("Renderer request sent");
   current.timer = setInterval(() => {
     if (!current.active) return;
@@ -95,30 +95,37 @@ function stopProgress() {
   progress = null;
 }
 
-appendLog("Ready. Select one layer in a Photoshop document.");
+appendLog("Ready. Select a layer, choose Mix, then apply.");
 function clampMix(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : 100;
 }
 slider.addEventListener("input", () => { number.value = slider.value; });
+number.addEventListener("input", () => {
+  if (number.value !== "" && Number.isFinite(Number(number.value)))
+    slider.value = String(clampMix(number.value));
+});
 number.addEventListener("change", () => {
   const mix = clampMix(number.value);
   number.value = slider.value = String(mix);
 });
 
-async function healthy() {
+async function bridgeVersion() {
   try {
     const response = await fetch(endpoint + "/health");
-    return response.ok && response.headers.get("X-DLSS-Bridge") === "1";
-  } catch (_) { return false; }
+    return response.ok ? Number(response.headers.get("X-DLSS-Bridge")) || 0 : 0;
+  } catch (_) { return 0; }
 }
 
 async function ensureBridge() {
   appendLog("Checking local renderer bridge");
-  if (await healthy()) {
+  const runningVersion = await bridgeVersion();
+  if (runningVersion === 2) {
     appendLog("Renderer bridge connected");
     return;
   }
+  if (runningVersion > 0)
+    throw new Error("An older DLSS bridge is still running. Close DLSSPhotoshopBridge.exe in Task Manager, then try again.");
   appendLog("Starting local renderer bridge");
   const pluginFolder = await fs.getPluginFolder();
   const nativeFolder = await pluginFolder.getEntry("native");
@@ -130,7 +137,7 @@ async function ensureBridge() {
   if (result) throw new Error("Could not start the local bridge: " + result);
   for (let attempt = 0; attempt < 40; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 250));
-    if (await healthy()) {
+    if (await bridgeVersion() === 2) {
       appendLog("Renderer bridge connected");
       return;
     }
@@ -193,6 +200,7 @@ async function processSelectedLayer() {
   if (busy) return;
   busy = true;
   button.disabled = true;
+  button.textContent = "Processing selected layer…";
   let captured = null;
   let resultImage = null;
   try {
@@ -282,6 +290,7 @@ async function processSelectedLayer() {
     if (captured) captured.imageData.dispose();
     busy = false;
     button.disabled = false;
+    button.textContent = "Apply to selected layer";
   }
 }
 

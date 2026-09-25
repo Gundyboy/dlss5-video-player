@@ -2,55 +2,112 @@
 <html>
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     * { box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; margin: 0; }
+    html, body { width: 100%; height: 100%; min-width: 0; margin: 0; }
     body {
-      min-width: 0;
-      padding: 12px;
-      overflow-y: auto;
-      color: var(--uxp-host-text-color);
-      font: 13px sans-serif;
-    }
-    h2 { font-size: 16px; margin: 0 0 14px; }
-    label { display: block; margin-bottom: 7px; }
-    .row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-    input[type=range] { flex: 1 1 auto; min-width: 55px; }
-    input[type=number] { flex: 0 0 52px; width: 52px; }
-    #process { width: 100%; min-height: 34px; margin-top: 14px; padding: 7px; }
-    #status {
-      margin: 12px 0;
-      min-height: 18px;
-      overflow-wrap: anywhere;
-      white-space: pre-wrap;
-    }
-    #status[data-state="error"], #status[data-state="done"] { font-weight: 600; }
-    h3 { font-size: 13px; margin: 0 0 6px; }
-    #log {
-      height: 180px;
-      min-height: 100px;
       overflow: auto;
-      padding: 8px;
-      border: 1px solid #7777;
-      border-radius: 4px;
-      font: 11px/1.45 monospace;
+      background: var(--uxp-host-background-color, #292929);
+      color: var(--uxp-host-text-color, #f2f2f2);
+      font: 13px/1.45 sans-serif;
+    }
+    .panel { width: 100%; max-width: 500px; margin: 0 auto; padding: 16px; }
+    .brand { display: flex; align-items: center; gap: 11px; min-width: 0; margin-bottom: 16px; }
+    .mark {
+      display: flex; flex: 0 0 34px; align-items: center; justify-content: center;
+      width: 34px; height: 34px; border-radius: 9px;
+      background: #6657cf; color: #fff; font-size: 17px; font-weight: 700;
+    }
+    .brand-text { min-width: 0; }
+    .eyebrow { margin: 0; opacity: .68; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+    h1 { margin: 1px 0 0; font-size: 17px; line-height: 1.2; }
+    .intro { margin: 0 0 16px; opacity: .85; }
+    .card {
+      min-width: 0; margin-bottom: 12px; padding: 14px;
+      border: 1px solid rgba(128, 128, 128, .55); border-radius: 10px;
+      background: rgba(128, 128, 128, .08);
+    }
+    .step { margin: 0 0 5px; opacity: .68; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    h2 { margin: 0 0 4px; font-size: 14px; line-height: 1.25; }
+    .hint { margin: 0; opacity: .74; font-size: 12px; }
+    .mix-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+    .mix-head h2 { margin: 0; }
+    .number-wrap { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; font-size: 14px; font-weight: 700; }
+    #mixNumber { width: 54px; min-width: 0; padding: 4px; text-align: right; font: inherit; }
+    #mix { display: block; width: 100%; min-width: 0; margin: 15px 0 7px; }
+    .range-labels { display: flex; justify-content: space-between; gap: 8px; opacity: .7; font-size: 11px; }
+    #process {
+      display: block; width: 100%; min-height: 40px; margin: 16px 0 0;
+      padding: 8px 12px; border: 0; border-radius: 7px;
+      background: #6657cf; color: #fff; font: 600 13px sans-serif;
+      cursor: pointer; white-space: normal;
+    }
+    #process:disabled { opacity: .55; cursor: default; }
+    .result-hint { margin: 8px 0 0; text-align: center; opacity: .7; font-size: 11px; }
+    .activity-title { margin: 18px 0 7px; font-size: 12px; font-weight: 700; }
+    #status {
+      min-height: 38px; padding: 10px 11px; border-radius: 7px;
+      background: rgba(128, 128, 128, .13);
+      overflow-wrap: anywhere; white-space: pre-wrap;
+    }
+    #status[data-state="done"] { border-left: 3px solid #54ae72; }
+    #status[data-state="error"] { border-left: 3px solid #d36c67; }
+    #status[data-state="working"] { border-left: 3px solid #8e83e4; }
+    .log-heading { margin: 16px 0 6px; opacity: .72; font-size: 11px; font-weight: 700; }
+    #log {
+      height: 145px; min-height: 90px; overflow: auto;
+      padding: 9px 10px; border: 1px solid rgba(128, 128, 128, .5);
+      border-radius: 7px; font: 11px/1.45 monospace;
     }
     .log-entry { margin-bottom: 5px; overflow-wrap: anywhere; white-space: pre-wrap; }
-    .log-entry[data-state="error"], .log-entry[data-state="done"] { font-weight: 600; }
+    .log-entry[data-state="error"], .log-entry[data-state="done"] { font-weight: 700; }
+    @media (max-width: 300px) {
+      .panel { padding: 11px; }
+      .card { padding: 11px; }
+      h1 { font-size: 15px; }
+    }
+    @media (max-height: 360px) { #log { height: 95px; } }
   </style>
 </head>
 <body>
-  <h2>DLSS Neural Mix</h2>
-  <label for="mix">Neural rendering mix</label>
-  <div class="row">
-    <input id="mix" type="range" min="0" max="100" value="100">
-    <input id="mixNumber" type="number" min="0" max="100" value="100" aria-label="Mix percentage">
-    <span>%</span>
-  </div>
-  <button id="process">Process selected layer</button>
-  <div id="status" role="status" aria-live="polite">Ready. Select one layer in a Photoshop document.</div>
-  <h3>Activity</h3>
-  <div id="log" role="log" aria-live="polite" aria-label="Processing activity"></div>
+  <main class="panel">
+    <header class="brand">
+      <div class="mark" aria-hidden="true">N</div>
+      <div class="brand-text">
+        <p class="eyebrow">Photoshop neural filter</p>
+        <h1>DLSS Neural Mix</h1>
+      </div>
+    </header>
+
+    <p class="intro">Render your selected layer with DLSS, then blend it with the original.</p>
+
+    <section class="card" aria-label="Layer selection">
+      <p class="step">1 · Source</p>
+      <h2>Choose one layer in Photoshop</h2>
+      <p class="hint">The new Smart Object appears above your selected layer.</p>
+    </section>
+
+    <section class="card" aria-label="Neural mix">
+      <p class="step">2 · Strength</p>
+      <div class="mix-head">
+        <h2><label for="mix">Neural mix</label></h2>
+        <div class="number-wrap">
+          <input id="mixNumber" type="number" min="0" max="100" value="100" aria-label="Neural mix percentage">
+          <span aria-hidden="true">%</span>
+        </div>
+      </div>
+      <input id="mix" type="range" min="0" max="100" value="100" aria-label="Neural mix percentage">
+      <div class="range-labels"><span>0% · Original</span><span>100% · Neural</span></div>
+      <button id="process" type="button">Apply to selected layer</button>
+      <p class="result-hint">Creates a new Smart Object and keeps the original</p>
+    </section>
+
+    <p class="activity-title">Progress</p>
+    <div id="status" role="status" aria-live="polite" data-state="ready">Ready. Select a layer, choose Mix, then apply.</div>
+    <p class="log-heading">Activity log</p>
+    <div id="log" role="log" aria-live="polite" aria-label="Processing activity"></div>
+  </main>
   <script src="panel.js"></script>
 </body>
 </html>
