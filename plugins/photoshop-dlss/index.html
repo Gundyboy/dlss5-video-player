@@ -12,7 +12,10 @@
       color: var(--uxp-host-text-color, #f2f2f2);
       font: 13px/1.45 sans-serif;
     }
-    .panel { width: 100%; max-width: 500px; margin: 0 auto; padding: 16px; }
+    .panel {
+      display: flex; flex-direction: column; width: 100%; max-width: 500px;
+      height: 100%; min-height: 100%; margin: 0 auto; padding: 16px;
+    }
     .brand { display: flex; align-items: center; gap: 11px; min-width: 0; margin-bottom: 16px; }
     .mark {
       display: flex; flex: 0 0 34px; align-items: center; justify-content: center;
@@ -56,7 +59,7 @@
     #status[data-state="working"] { border-left: 3px solid #8e83e4; }
     .log-heading { margin: 16px 0 6px; opacity: .72; font-size: 11px; font-weight: 700; }
     #log {
-      height: 145px; min-height: 90px; overflow: auto;
+      flex: 1 1 145px; min-height: 90px; overflow: auto;
       padding: 9px 10px; border: 1px solid rgba(128, 128, 128, .5);
       border-radius: 7px; font: 11px/1.45 monospace;
     }
@@ -67,7 +70,7 @@
       .card { padding: 11px; }
       h1 { font-size: 15px; }
     }
-    @media (max-height: 360px) { #log { height: 95px; } }
+    @media (max-height: 360px) { #log { flex-basis: 95px; } }
   </style>
 </head>
 <body>

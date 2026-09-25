@@ -7,7 +7,10 @@ Photoshop adds the result above the source as a Smart Object named
 are retained. At 0%, the plugin duplicates the layer without starting a render.
 
 The panel has one strength control, an Apply button, progress, and a bounded
-activity log. It scrolls when docked in a small panel.
+activity log. Its preferred height is 700 pixels when docked and 760 when
+floating. Photoshop allows resizing within the manifest bounds where its
+workspace permits; the content scrolls in smaller panels and the log grows in
+taller ones.
 
 ## Neural-only path
 

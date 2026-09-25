@@ -153,6 +153,45 @@ function selectedLayer() {
   return { document, layer: document.activeLayers[0] };
 }
 
+async function captureSelectedLayer(documentId, layerId) {
+  // Photoshop requires the imaging read to run inside a modal scope. Copy the
+  // pixels and release that scope before the potentially long neural render.
+  return core.executeAsModal(async () => {
+    const current = app.activeDocument;
+    if (!current || current.id !== documentId ||
+        current.activeLayers.length !== 1 || current.activeLayers[0].id !== layerId)
+      throw new Error("The selected document or layer changed before capture.");
+    const captured = await imaging.getPixels({
+      documentID: documentId,
+      layerID: layerId,
+      componentSize: 8,
+      colorSpace: "RGB",
+      colorProfile: "sRGB IEC61966-2.1",
+      applyAlpha: false
+    });
+    try {
+      const width = captured.imageData.width;
+      const height = captured.imageData.height;
+      if (width < 64 || height < 64)
+        throw new Error("DLSS Neural Rendering needs at least 64 × 64 pixels in the selected layer.");
+      if (width > 8192 || height > 8192)
+        throw new Error("DLSS Neural Rendering supports up to 8192 × 8192 pixels. Resize the selected layer first.");
+      const pixelCount = width * height;
+      if (!pixelCount || pixelCount > 64000000)
+        throw new Error("The selected layer is empty or exceeds 64 megapixels.");
+      const components = captured.imageData.components;
+      if (components !== 3 && components !== 4)
+        throw new Error("This layer could not be read as RGB pixels.");
+      const source = await captured.imageData.getData({ chunky: true });
+      if (source.length !== pixelCount * components)
+        throw new Error("Photoshop returned an incomplete pixel buffer for this layer.");
+      return { width, height, source, components, bounds: captured.sourceBounds };
+    } finally {
+      captured.imageData.dispose();
+    }
+  }, { commandName: "Read selected layer" });
+}
+
 async function convertActiveToSmartObject(document, layerId, name) {
   await action.batchPlay([
     { _obj: "select", _target: [{ _ref: "layer", _id: layerId }], makeVisible: false },
@@ -163,25 +202,33 @@ async function convertActiveToSmartObject(document, layerId, name) {
   smart.name = name;
 }
 
-async function insertResult(documentId, sourceId, imageData, bounds, name) {
+async function insertResult(documentId, sourceId, pixels, width, height, bounds, name) {
   await core.executeAsModal(async () => {
     const current = app.activeDocument;
     if (!current || current.id !== documentId ||
         current.activeLayers.length !== 1 || current.activeLayers[0].id !== sourceId)
       throw new Error("The selected document or layer changed during rendering.");
     const source = current.activeLayers[0];
-    const layer = await current.createPixelLayer({ name });
-    layer.opacity = source.opacity;
-    layer.blendMode = source.blendMode;
-    await imaging.putPixels({
-      documentID: documentId,
-      layerID: layer.id,
-      imageData,
-      targetBounds: { left: bounds.left, top: bounds.top },
-      replace: true
+    const imageData = await imaging.createImageDataFromBuffer(pixels, {
+      width, height, components: 4, colorSpace: "RGB",
+      colorProfile: "sRGB IEC61966-2.1"
     });
-    layer.move(source, constants.ElementPlacement.PLACEBEFORE);
-    await convertActiveToSmartObject(current, layer.id, name);
+    try {
+      const layer = await current.createPixelLayer({ name });
+      layer.opacity = source.opacity;
+      layer.blendMode = source.blendMode;
+      await imaging.putPixels({
+        documentID: documentId,
+        layerID: layer.id,
+        imageData,
+        targetBounds: { left: bounds.left, top: bounds.top },
+        replace: true
+      });
+      layer.move(source, constants.ElementPlacement.PLACEBEFORE);
+      await convertActiveToSmartObject(current, layer.id, name);
+    } finally {
+      imageData.dispose();
+    }
   }, { commandName: name });
 }
 
@@ -201,8 +248,6 @@ async function processSelectedLayer() {
   busy = true;
   button.disabled = true;
   button.textContent = "Processing selected layer…";
-  let captured = null;
-  let resultImage = null;
   try {
     const mix = clampMix(number.value);
     number.value = slider.value = String(mix);
@@ -216,30 +261,10 @@ async function processSelectedLayer() {
     }
 
     setStatus("Reading selected layer…");
-    captured = await imaging.getPixels({
-      documentID: document.id,
-      layerID: layer.id,
-      componentSize: 8,
-      colorSpace: "RGB",
-      colorProfile: "sRGB IEC61966-2.1",
-      applyAlpha: false
-    });
-    const width = captured.imageData.width;
-    const height = captured.imageData.height;
+    const captured = await captureSelectedLayer(document.id, layer.id);
+    const { width, height, source, components } = captured;
     appendLog(`Layer size: ${width} × ${height}`);
-    if (width < 64 || height < 64)
-      throw new Error("DLSS Neural Rendering needs at least 64 × 64 pixels in the selected layer.");
-    if (width > 8192 || height > 8192)
-      throw new Error("DLSS Neural Rendering supports up to 8192 × 8192 pixels. Resize the selected layer first.");
     const pixelCount = width * height;
-    if (!pixelCount || pixelCount > 64000000)
-      throw new Error("The selected layer is empty or exceeds 64 megapixels.");
-    const source = await captured.imageData.getData({ chunky: true });
-    const components = captured.imageData.components;
-    if (components !== 3 && components !== 4)
-      throw new Error("This layer could not be read as RGB pixels.");
-    if (source.length !== pixelCount * components)
-      throw new Error("Photoshop returned an incomplete pixel buffer for this layer.");
     const rgb = new Uint8Array(pixelCount * 3);
     for (let i = 0, j = 0; i < source.length; i += components, j += 3) {
       rgb[j] = source[i]; rgb[j + 1] = source[i + 1]; rgb[j + 2] = source[i + 2];
@@ -274,20 +299,14 @@ async function processSelectedLayer() {
       output[o + 2] = mix === 100 ? neural[n + 2] : Math.round((source[s + 2] * originalWeight + neural[n + 2] * mix) / 100);
       output[o + 3] = components === 4 ? source[s + 3] : 255;
     }
-    resultImage = await imaging.createImageDataFromBuffer(output, {
-      width, height, components: 4, colorSpace: "RGB",
-      colorProfile: "sRGB IEC61966-2.1"
-    });
     setStatus("Adding Smart Object…");
-    await insertResult(document.id, layer.id, resultImage, captured.sourceBounds, name);
+    await insertResult(document.id, layer.id, output, width, height, captured.bounds, name);
     setStatus(`Done: ${name}`, "done");
   } catch (error) {
     setStatus("Failed: " + (error && error.message ? error.message : String(error)), "error");
     console.error(error);
   } finally {
     stopProgress();
-    if (resultImage) resultImage.dispose();
-    if (captured) captured.imageData.dispose();
     busy = false;
     button.disabled = false;
     button.textContent = "Apply to selected layer";
