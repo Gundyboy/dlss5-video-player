@@ -3,13 +3,40 @@
 <head>
   <meta charset="utf-8">
   <style>
-    body { padding: 14px; color: var(--uxp-host-text-color); font: 13px sans-serif; }
-    h2 { font-size: 16px; margin: 0 0 12px; }
-    .row { display: flex; align-items: center; gap: 10px; }
-    input[type=range] { flex: 1; }
-    input[type=number] { width: 54px; }
-    button { width: 100%; margin-top: 14px; padding: 8px; }
-    #status { margin-top: 10px; min-height: 3em; white-space: pre-wrap; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; }
+    body {
+      min-width: 0;
+      padding: 12px;
+      overflow-y: auto;
+      color: var(--uxp-host-text-color);
+      font: 13px sans-serif;
+    }
+    h2 { font-size: 16px; margin: 0 0 14px; }
+    label { display: block; margin-bottom: 7px; }
+    .row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    input[type=range] { flex: 1 1 auto; min-width: 55px; }
+    input[type=number] { flex: 0 0 52px; width: 52px; }
+    #process { width: 100%; min-height: 34px; margin-top: 14px; padding: 7px; }
+    #status {
+      margin: 12px 0;
+      min-height: 18px;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+    #status[data-state="error"], #status[data-state="done"] { font-weight: 600; }
+    h3 { font-size: 13px; margin: 0 0 6px; }
+    #log {
+      height: 180px;
+      min-height: 100px;
+      overflow: auto;
+      padding: 8px;
+      border: 1px solid #7777;
+      border-radius: 4px;
+      font: 11px/1.45 monospace;
+    }
+    .log-entry { margin-bottom: 5px; overflow-wrap: anywhere; white-space: pre-wrap; }
+    .log-entry[data-state="error"], .log-entry[data-state="done"] { font-weight: 600; }
   </style>
 </head>
 <body>
@@ -21,7 +48,9 @@
     <span>%</span>
   </div>
   <button id="process">Process selected layer</button>
-  <div id="status" role="status">Select one layer in a Photoshop document.</div>
+  <div id="status" role="status" aria-live="polite">Ready. Select one layer in a Photoshop document.</div>
+  <h3>Activity</h3>
+  <div id="log" role="log" aria-live="polite" aria-label="Processing activity"></div>
   <script src="panel.js"></script>
 </body>
 </html>

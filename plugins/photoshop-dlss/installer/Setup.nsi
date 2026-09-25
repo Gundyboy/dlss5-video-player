@@ -4,9 +4,10 @@ Unicode True
 !include "MUI2.nsh"
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
+!include "FileFunc.nsh"
 
 !define PRODUCT "DLSS Neural Mix"
-!define VERSION "0.1.1"
+!define VERSION "0.1.2"
 !define STAGE "..\dist\setup"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\DLSSNeuralMix"
 
@@ -17,7 +18,7 @@ RequestExecutionLevel user
 ShowInstDetails show
 ShowUninstDetails show
 SetCompressor /SOLID lzma
-VIProductVersion "0.1.1.0"
+VIProductVersion "0.1.2.0"
 VIAddVersionKey "ProductName" "${PRODUCT}"
 VIAddVersionKey "FileDescription" "${PRODUCT} setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
@@ -74,7 +75,12 @@ FunctionEnd
 
 Function BrowseForPlayer
   Pop $0
-  nsDialogs::SelectFileDialog open "$PlayerExe" "DLSS Video Player|DLSSVideoPlayer.exe|Executable files|*.exe"
+  ${NSD_GetText} $PlayerInput $PlayerExe
+  ${GetParent} "$PlayerExe" $2
+  IfFileExists "$2\*.*" +2 0
+    StrCpy $2 "$DESKTOP"
+  ; An initial directory leaves the filename blank while moving between folders.
+  nsDialogs::SelectFileDialog open "$2" "Executable files (*.exe)|*.exe|All files (*.*)|*.*"
   Pop $1
   StrCmp $1 "" done
   StrCpy $PlayerExe $1

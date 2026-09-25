@@ -7,11 +7,95 @@ const slider = document.getElementById("mix");
 const number = document.getElementById("mixNumber");
 const button = document.getElementById("process");
 const status = document.getElementById("status");
+const log = document.getElementById("log");
 let busy = false;
+let progress = null;
 
 entrypoints.setup({ panels: { dlssNeuralMix: { show() {} } } });
 
-function setStatus(message) { status.textContent = message; }
+function appendLog(message, state = "normal") {
+  const followTail = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+  const entry = document.createElement("div");
+  entry.className = "log-entry";
+  entry.dataset.state = state;
+  entry.textContent = `${new Date().toLocaleTimeString()}  ${message}`;
+  log.appendChild(entry);
+  while (log.childNodes.length > 100) log.removeChild(log.firstChild);
+  if (followTail) log.scrollTop = log.scrollHeight;
+}
+
+function setStatus(message, state = "normal") {
+  status.textContent = message;
+  status.dataset.state = state;
+  appendLog(message, state);
+}
+
+function elapsedText(seconds) {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+const bridgePhases = {
+  receiving: "Receiving image pixels",
+  checkingCache: "Checking render cache",
+  rendering: "Running DLSS Neural Rendering",
+  decoding: "Decoding rendered image",
+  sending: "Returning rendered pixels"
+};
+
+async function pollBridgeStatus(current) {
+  if (!current.active || current.polling) return;
+  current.polling = true;
+  try {
+    const response = await fetch(endpoint + "/status");
+    if (response.status === 404 && current.active) {
+      clearInterval(current.pollTimer);
+      appendLog("Bridge stage updates need the new bridge version. Elapsed time remains visible.");
+      return;
+    }
+    if (!response.ok || !current.active) return;
+    const data = await response.json();
+    const next = data.busy && bridgePhases[data.phase];
+    if (next && next !== current.stage && current.active) {
+      current.stage = next;
+      appendLog(next);
+    }
+  } catch (_) {
+    // Older bridge versions have no status endpoint; the elapsed timer remains.
+  } finally { current.polling = false; }
+}
+
+function startProgress() {
+  const current = {
+    active: true,
+    polling: false,
+    started: Date.now(),
+    nextLog: Date.now() + 30000,
+    stage: "Waiting for renderer response"
+  };
+  progress = current;
+  status.dataset.state = "normal";
+  appendLog("Renderer request sent");
+  current.timer = setInterval(() => {
+    if (!current.active) return;
+    const elapsed = Math.floor((Date.now() - current.started) / 1000);
+    status.textContent = `${current.stage} · ${elapsedText(elapsed)} elapsed`;
+    if (Date.now() >= current.nextLog) {
+      appendLog(`${current.stage} (${elapsedText(elapsed)} elapsed)`);
+      current.nextLog = Date.now() + 30000;
+    }
+  }, 1000);
+  current.pollTimer = setInterval(() => { pollBridgeStatus(current); }, 1500);
+}
+
+function stopProgress() {
+  if (!progress) return;
+  progress.active = false;
+  clearInterval(progress.timer);
+  clearInterval(progress.pollTimer);
+  progress = null;
+}
+
+appendLog("Ready. Select one layer in a Photoshop document.");
 function clampMix(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : 100;
@@ -30,7 +114,12 @@ async function healthy() {
 }
 
 async function ensureBridge() {
-  if (await healthy()) return;
+  appendLog("Checking local renderer bridge");
+  if (await healthy()) {
+    appendLog("Renderer bridge connected");
+    return;
+  }
+  appendLog("Starting local renderer bridge");
   const pluginFolder = await fs.getPluginFolder();
   const nativeFolder = await pluginFolder.getEntry("native");
   const executable = await nativeFolder.getEntry("DLSSPhotoshopBridge.exe");
@@ -41,7 +130,10 @@ async function ensureBridge() {
   if (result) throw new Error("Could not start the local bridge: " + result);
   for (let attempt = 0; attempt < 40; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 250));
-    if (await healthy()) return;
+    if (await healthy()) {
+      appendLog("Renderer bridge connected");
+      return;
+    }
   }
   throw new Error("The local bridge did not start. Check %LOCALAPPDATA%\\DLSSPhotoshopBridge\\bridge.log.");
 }
@@ -111,7 +203,7 @@ async function processSelectedLayer() {
     if (mix === 0) {
       setStatus("Creating Smart Object…");
       await duplicateAtZero(document.id, layer.id, name);
-      setStatus(`Done: ${name}`);
+      setStatus(`Done: ${name}`, "done");
       return;
     }
 
@@ -126,6 +218,9 @@ async function processSelectedLayer() {
     });
     const width = captured.imageData.width;
     const height = captured.imageData.height;
+    appendLog(`Layer size: ${width} × ${height}`);
+    if (width < 64 || height < 64)
+      throw new Error("DLSS Neural Rendering needs at least 64 × 64 pixels in the selected layer.");
     if (width > 8192 || height > 8192)
       throw new Error("DLSS Neural Rendering supports up to 8192 × 8192 pixels. Resize the selected layer first.");
     const pixelCount = width * height;
@@ -135,13 +230,16 @@ async function processSelectedLayer() {
     const components = captured.imageData.components;
     if (components !== 3 && components !== 4)
       throw new Error("This layer could not be read as RGB pixels.");
+    if (source.length !== pixelCount * components)
+      throw new Error("Photoshop returned an incomplete pixel buffer for this layer.");
     const rgb = new Uint8Array(pixelCount * 3);
     for (let i = 0, j = 0; i < source.length; i += components, j += 3) {
       rgb[j] = source[i]; rgb[j + 1] = source[i + 1]; rgb[j + 2] = source[i + 2];
     }
 
-    setStatus(`Rendering ${width} × ${height}…`);
+    setStatus(`Preparing ${width} × ${height} render…`);
     await ensureBridge();
+    startProgress();
     const response = await fetch(endpoint + "/render", {
       method: "POST",
       headers: {
@@ -151,10 +249,15 @@ async function processSelectedLayer() {
       },
       body: rgb.buffer
     });
-    if (!response.ok) throw new Error(await response.text());
+    if (!response.ok) {
+      stopProgress();
+      throw new Error(await response.text());
+    }
     const neural = new Uint8Array(await response.arrayBuffer());
+    stopProgress();
     if (neural.length !== pixelCount * 3)
       throw new Error("The renderer returned the wrong number of pixels.");
+    setStatus("Mixing rendered and original pixels…");
     const output = new Uint8Array(pixelCount * 4);
     const originalWeight = 100 - mix;
     for (let p = 0, s = 0, n = 0, o = 0; p < pixelCount; p++, s += components, n += 3, o += 4) {
@@ -169,11 +272,12 @@ async function processSelectedLayer() {
     });
     setStatus("Adding Smart Object…");
     await insertResult(document.id, layer.id, resultImage, captured.sourceBounds, name);
-    setStatus(`Done: ${name}`);
+    setStatus(`Done: ${name}`, "done");
   } catch (error) {
-    setStatus("Failed: " + (error && error.message ? error.message : String(error)));
+    setStatus("Failed: " + (error && error.message ? error.message : String(error)), "error");
     console.error(error);
   } finally {
+    stopProgress();
     if (resultImage) resultImage.dispose();
     if (captured) captured.imageData.dispose();
     busy = false;

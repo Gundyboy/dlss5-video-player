@@ -11,6 +11,19 @@ $dist = Join-Path $plugin 'dist'
 $uxp = Join-Path $dist 'uxp'
 $setup = Join-Path $dist 'setup'
 
+# Recreate generated staging folders so repeated builds cannot package stale files.
+$distPath = [IO.Path]::GetFullPath($dist)
+foreach ($stagePath in @($uxp, $setup)) {
+    $fullPath = [IO.Path]::GetFullPath($stagePath)
+    if (-not $fullPath.StartsWith($distPath + [IO.Path]::DirectorySeparatorChar,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean a staging folder outside dist: $fullPath"
+    }
+    if (Test-Path -LiteralPath $fullPath) {
+        Remove-Item -LiteralPath $fullPath -Recurse -Force
+    }
+}
+
 if (-not (Test-Path -LiteralPath $PlayerPath -PathType Leaf)) {
     throw "Build the patched player first: $PlayerPath"
 }

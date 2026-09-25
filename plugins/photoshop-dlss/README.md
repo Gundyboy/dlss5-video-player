@@ -19,6 +19,10 @@ twice. Zero percent duplicates the layer without launching the renderer.
 4. Select one layer, choose 0–100%, and press **Process selected layer**.
    Photoshop asks before it launches the local companion for the first time.
 
+The panel's Activity log shows each step and the bridge's current render stage.
+During a long render, the status line shows elapsed time and the log adds an
+update every 30 seconds. A failed step stays visible in the log for diagnosis.
+
 The companion listens only on `127.0.0.1:47837` and uses the player's existing
 `--render` image path. Pixel data goes over the local loopback connection; the
 bridge uses temporary files under `%LOCALAPPDATA%\DLSSPhotoshopBridge` and

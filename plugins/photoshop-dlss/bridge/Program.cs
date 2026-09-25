@@ -5,6 +5,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 internal static class Program
@@ -16,6 +17,8 @@ internal static class Program
         "DLSSPhotoshopBridge");
     private static string? lastKey;
     private static string? lastRgb;
+    private static int rendering;
+    private static string phase = "idle";
 
     private static async Task<int> Main()
     {
@@ -34,9 +37,9 @@ internal static class Program
             HttpListenerContext context;
             try { context = await listener.GetContextAsync(); }
             catch (Exception error) { Log("Listener stopped: " + error); return 1; }
-            // One render at a time: the neural runtime is exclusive and its
-            // ReShade settings must not be changed by a concurrent job.
-            await Handle(context);
+            // Serve status requests while a render is running. Render itself
+            // remains exclusive because it changes the player's settings.
+            _ = Task.Run(() => Handle(context));
         }
     }
 
@@ -58,9 +61,29 @@ internal static class Program
             {
                 await WriteText(response, 200, "ready");
             }
+            else if (context.Request.HttpMethod == "GET" && path == "/status")
+            {
+                var body = JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    busy = Volatile.Read(ref rendering) != 0,
+                    phase = Volatile.Read(ref phase)
+                });
+                response.StatusCode = 200;
+                response.ContentType = "application/json";
+                response.ContentLength64 = body.Length;
+                await response.OutputStream.WriteAsync(body, 0, body.Length);
+            }
             else if (context.Request.HttpMethod == "POST" && path == "/render")
             {
-                await Render(context);
+                if (Interlocked.CompareExchange(ref rendering, 1, 0) != 0)
+                    await WriteText(response, 409, "The renderer is already processing another image.");
+                else
+                {
+                    SetPhase("receiving");
+                    try { await Render(context); }
+                    catch { SetPhase("failed"); throw; }
+                    finally { Volatile.Write(ref rendering, 0); }
+                }
             }
             else await WriteText(response, 404, "Unknown bridge endpoint.");
         }
@@ -107,6 +130,7 @@ internal static class Program
             var output = Path.Combine(job, "output.png");
             var raw = Path.Combine(job, "output.rgb");
             var digest = await WriteBmp(request.InputStream, input, width, height);
+            SetPhase("checkingCache");
             var playerDirectory = Path.GetDirectoryName(player)!;
             var settingsPath = Path.Combine(playerDirectory, "neural-runtime", "ReShade.ini");
             var playerSettingsPath = Path.Combine(playerDirectory, "DLSSVideoPlayer.ini");
@@ -116,15 +140,19 @@ internal static class Program
                 File.GetLastWriteTimeUtc(playerSettingsPath).Ticks;
             if (CacheKey() == lastKey && lastRgb != null && File.Exists(lastRgb))
             {
+                SetPhase("sending");
                 await SendRgb(response, lastRgb, inputBytes);
+                SetPhase("complete");
                 return;
             }
 
             Log($"Rendering {width}x{height}");
+            SetPhase("rendering");
             await RunProcess(player,
                 $"--render {Quote(input)} --stages nr --out {Quote(output)} --quiet",
                 Path.GetDirectoryName(player)!);
             if (!File.Exists(output)) throw new IOException("The player produced no neural PNG.");
+            SetPhase("decoding");
             await RunProcess(ffmpeg,
                 $"-hide_banner -nostdin -loglevel error -y -i {Quote(output)} -frames:v 1 -f rawvideo -pix_fmt rgb24 {Quote(raw)}",
                 Path.GetDirectoryName(player)!);
@@ -137,7 +165,9 @@ internal static class Program
             // The player may update ReShade.ini during the render. Cache the
             // resulting settings timestamp so the next identical request hits.
             lastKey = CacheKey();
+            SetPhase("sending");
             await SendRgb(response, cache, inputBytes);
+            SetPhase("complete");
             Log($"Completed {width}x{height}");
         }
         finally { try { Directory.Delete(job, true); } catch { } }
@@ -248,6 +278,7 @@ internal static class Program
     }
 
     private static string Quote(string path) => "\"" + path.Replace("\"", "\\\"") + "\"";
+    private static void SetPhase(string value) => Volatile.Write(ref phase, value);
     private static void Log(string message)
     {
         try { File.AppendAllText(Path.Combine(WorkRoot, "bridge.log"),
