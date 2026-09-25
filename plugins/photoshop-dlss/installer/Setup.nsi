@@ -7,7 +7,7 @@ Unicode True
 !include "FileFunc.nsh"
 
 !define PRODUCT "DLSS Neural Mix"
-!define VERSION "0.2.4"
+!define VERSION "0.2.5"
 !define STAGE "..\dist\setup"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\DLSSNeuralMix"
 
@@ -18,7 +18,7 @@ RequestExecutionLevel user
 ShowInstDetails show
 ShowUninstDetails show
 SetCompressor /SOLID lzma
-VIProductVersion "0.2.4.0"
+VIProductVersion "0.2.5.0"
 VIAddVersionKey "ProductName" "${PRODUCT}"
 VIAddVersionKey "FileDescription" "${PRODUCT} setup"
 VIAddVersionKey "FileVersion" "${VERSION}"

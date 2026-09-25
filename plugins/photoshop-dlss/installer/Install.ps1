@@ -92,6 +92,9 @@ New-Item -ItemType Directory -Path $bridgeSettings -Force | Out-Null
 
 & $upia /install $package
 if ($LASTEXITCODE -ne 0) { throw "Adobe UPIA installation failed with exit code $LASTEXITCODE." }
+# UPIA and Adobe background components may briefly touch the old package after
+# the initial preflight. Recheck immediately before moving obsolete versions.
+Stop-DlssBridgeForUpgrade
 Move-ObsoleteDlssPlugins -ExternalRoot (Join-Path $env:APPDATA 'Adobe\UXP\Plugins\External') `
     -BackupRoot (Join-Path $installRoot 'PluginBackups') -Identity $identity
 Write-Output "DLSS Neural Mix v$($identity.Version) installed. Start Photoshop, then open Plugins > DLSS Neural Mix."

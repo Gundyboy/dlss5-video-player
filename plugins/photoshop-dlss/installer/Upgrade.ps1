@@ -88,7 +88,20 @@ function Move-ObsoleteDlssPlugins {
             -not $destination.StartsWith($backup + '\', [StringComparison]::OrdinalIgnoreCase)) {
             throw 'Refusing to move plugin files outside the verified upgrade paths.'
         }
-        Move-Item -LiteralPath $source -Destination $destination -ErrorAction Stop
+        $moveError = $null
+        for ($attempt = 1; $attempt -le 5; $attempt++) {
+            try {
+                Move-Item -LiteralPath $source -Destination $destination -ErrorAction Stop
+                $moveError = $null
+                break
+            } catch {
+                $moveError = $_
+                if ($attempt -lt 5) { Start-Sleep -Milliseconds 250 }
+            }
+        }
+        if ($moveError) {
+            throw "Could not archive $($folder.Name). A process may still be using its files: $($moveError.Exception.Message)"
+        }
         Write-Output "Archived obsolete plugin: $($folder.Name)"
     }
     Write-Output "Previous plugin files saved in $batch"
@@ -112,11 +125,15 @@ function Stop-DlssBridgeForUpgrade {
         if ($children.Count) { throw 'The DLSS bridge has an active renderer. Wait for it to finish before installing.' }
     }
     foreach ($bridge in $bridges) {
-        $process = Get-Process -Id $bridge.ProcessId -ErrorAction SilentlyContinue
-        if ($process -and $process.Path -ieq $bridge.ExecutablePath) {
-            Stop-Process -Id $process.Id -ErrorAction Stop
-            if (-not $process.WaitForExit(10000)) { throw 'The previous DLSS bridge did not stop.' }
-            Write-Output 'Stopped the previous local renderer bridge.'
+        # ExecutablePath and session were already verified through Win32_Process.
+        # Get-Process.Path can be blank when 32-bit setup inspects this 64-bit
+        # process, which previously caused setup to skip the stop without error.
+        if (-not (Get-Process -Id $bridge.ProcessId -ErrorAction SilentlyContinue)) { continue }
+        Stop-Process -Id $bridge.ProcessId -ErrorAction Stop
+        Wait-Process -Id $bridge.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+        if (Get-Process -Id $bridge.ProcessId -ErrorAction SilentlyContinue) {
+            throw 'The previous DLSS bridge did not stop.'
         }
+        Write-Output 'Stopped the previous local renderer bridge.'
     }
 }

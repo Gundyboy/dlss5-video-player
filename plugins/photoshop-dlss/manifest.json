@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "id": "com.reality3d.dlssneuralmix",
   "name": "DLSS Neural Mix",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "main": "index.html",
   "host": { "app": "PS", "minVersion": "25.0.0" },
   "icons": [
