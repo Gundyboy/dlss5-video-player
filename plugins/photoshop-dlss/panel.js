@@ -126,6 +126,8 @@ async function processSelectedLayer() {
     });
     const width = captured.imageData.width;
     const height = captured.imageData.height;
+    if (width > 8192 || height > 8192)
+      throw new Error("DLSS Neural Rendering supports up to 8192 × 8192 pixels. Resize the selected layer first.");
     const pixelCount = width * height;
     if (!pixelCount || pixelCount > 64000000)
       throw new Error("The selected layer is empty or exceeds 64 megapixels.");

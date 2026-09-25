@@ -82,10 +82,10 @@ internal static class Program
         var response = context.Response;
         if (!int.TryParse(request.Headers["X-Width"], out var width) ||
             !int.TryParse(request.Headers["X-Height"], out var height) ||
-            width < 64 || height < 64 || width > 16384 || height > 16384 ||
+            width < 64 || height < 64 || width > 8192 || height > 8192 ||
             (long)width * height > MaxPixels)
         {
-            await WriteText(response, 400, "Invalid image dimensions.");
+            await WriteText(response, 400, "Image dimensions must be 64–8192 pixels on each side and at most 64 megapixels.");
             return;
         }
         var inputBytes = checked((long)width * height * 3);

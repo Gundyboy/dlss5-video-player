@@ -26,6 +26,7 @@ New-Item -ItemType Directory -Path (Join-Path $uxp 'native'), (Join-Path $setup 
 foreach ($name in @('manifest.json', 'index.html', 'panel.js')) {
     Copy-Item -LiteralPath (Join-Path $plugin $name) -Destination (Join-Path $uxp $name) -Force
 }
+Copy-Item -LiteralPath (Join-Path $plugin 'icons') -Destination (Join-Path $uxp 'icons') -Recurse -Force
 foreach ($name in @('DLSSPhotoshopBridge.exe', 'DLSSPhotoshopBridge.dll',
         'DLSSPhotoshopBridge.deps.json', 'DLSSPhotoshopBridge.runtimeconfig.json')) {
     Copy-Item -LiteralPath (Join-Path $bridgeBuild $name) -Destination (Join-Path $uxp "native\$name") -Force

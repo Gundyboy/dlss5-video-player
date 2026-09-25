@@ -1,6 +1,7 @@
 # DLSS Neural Mix installer
 
-Run `Install.cmd` on Windows. It installs the `.ccx` Photoshop plugin through
+Extract `DLSS-Neural-Mix-Setup-win64.zip`, then run `Install.cmd` on Windows.
+It installs the `.ccx` Photoshop plugin through
 Adobe's Unified Plugin Installer Agent and prepares the local neural renderer.
 The default source is `Desktop\DLSSVideoPlayer-v0.26.0-win64`. For a different
 unpacked complete player, run PowerShell with `-RuntimePath`:
@@ -23,3 +24,8 @@ copied renderer remains under `%LOCALAPPDATA%\DLSSNeuralMix` until you remove it
 
 This is an independent Windows package, not a Marketplace release. See
 `payload\THIRD_PARTY.md` for the runtime's separate terms and provenance.
+
+To rebuild the installer from source, run `Build-Installer.ps1` to stage the
+plugin, package `dist\uxp\manifest.json` as a `.ccx` with Adobe UXP Developer
+Tool, then run `Build-Installer.ps1 -CcxFile <path-to-ccx>`. The resulting ZIP
+is written to `dist\DLSS-Neural-Mix-Setup-win64.zip`.

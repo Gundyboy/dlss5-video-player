@@ -27,7 +27,8 @@ running, so changing Mix on identical pixels does not run the model again.
 
 The bridge needs the local .NET Core 3.1 runtime. The Photoshop panel currently
 handles RGB pixels at 8 bits per component, with each layer at least 64 pixels
-wide and tall and no more than 64 megapixels. Photoshop
+wide and tall, no more than 8192 pixels on either side, and no more than 64
+megapixels. Photoshop
 converts other document modes to sRGB for this pass. The selected layer's alpha
 is retained; its pixels are sent to the model as RGB because the current neural
 worker accepts opaque still images. The model processes the layer at its native
@@ -37,3 +38,11 @@ comparison rendering is requested.
 The bridge log is `%LOCALAPPDATA%\DLSSPhotoshopBridge\bridge.log`. The existing
 player and worker logs remain beside their executables. This is a local plugin;
 it has not been packaged or signed for Adobe Marketplace distribution.
+
+## Windows installer
+
+The installer bundle is `dist/DLSS-Neural-Mix-Setup-win64.zip`. Extract it, then
+run `Install.cmd`. It checks the existing neural runtime in the unpacked video
+player, copies it beside the patched player, and installs the Photoshop `.ccx`
+through Adobe's Unified Plugin Installer Agent. See `installer/README.md` for
+requirements and the `-RuntimePath` option.
