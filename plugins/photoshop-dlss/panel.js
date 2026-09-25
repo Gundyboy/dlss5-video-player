@@ -3,7 +3,7 @@ const { entrypoints, shell, storage } = require("uxp");
 
 // UXP's manifest allowlist rejects numeric loopback addresses in Photoshop.
 const endpoint = "http://localhost:47837";
-const panelVersion = "0.2.3";
+const panelVersion = "0.2.4";
 const fs = storage.localFileSystem;
 const slider = document.getElementById("mix");
 const number = document.getElementById("mixNumber");
@@ -101,7 +101,7 @@ function stopProgress() {
 appendLog(`DLSS Neural Mix v${panelVersion} ready. Select a layer, choose Mix, then apply.`);
 function clampMix(value) {
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : 100;
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(200, Math.round(parsed))) : 100;
 }
 slider.addEventListener("input", () => { number.value = slider.value; });
 number.addEventListener("input", () => {
@@ -250,6 +250,62 @@ async function duplicateAtZero(documentId, sourceId, name) {
   }, { commandName: name });
 }
 
+const srgbToLinear = new Float32Array(256);
+for (let value = 0; value < 256; value++) {
+  const encoded = value / 255;
+  srgbToLinear[value] = encoded <= 0.04045
+    ? encoded / 12.92
+    : Math.pow((encoded + 0.055) / 1.055, 2.4);
+}
+
+function linearToByte(value) {
+  const linear = Math.max(0, Math.min(1, value));
+  const encoded = linear <= 0.0031308
+    ? linear * 12.92
+    : 1.055 * Math.pow(linear, 1 / 2.4) - 0.055;
+  return Math.round(encoded * 255);
+}
+
+function composePixels(source, neural, components, mix, pixelCount) {
+  const output = new Uint8Array(pixelCount * 4);
+  if (mix < 100) {
+    const originalWeight = 100 - mix;
+    for (let p = 0, s = 0, n = 0, o = 0; p < pixelCount; p++, s += components, n += 3, o += 4) {
+      output[o] = Math.round((source[s] * originalWeight + neural[n] * mix) / 100);
+      output[o + 1] = Math.round((source[s + 1] * originalWeight + neural[n + 1] * mix) / 100);
+      output[o + 2] = Math.round((source[s + 2] * originalWeight + neural[n + 2] * mix) / 100);
+      output[o + 3] = components === 4 ? source[s + 3] : 255;
+    }
+    return output;
+  }
+  if (mix === 100) {
+    for (let p = 0, s = 0, n = 0, o = 0; p < pixelCount; p++, s += components, n += 3, o += 4) {
+      output[o] = neural[n]; output[o + 1] = neural[n + 1]; output[o + 2] = neural[n + 2];
+      output[o + 3] = components === 4 ? source[s + 3] : 255;
+    }
+    return output;
+  }
+
+  // Match the video player's 100–200% Mix: extend the model's luminance ratio
+  // in linear light, bound it to 0.5–2×, and keep the neural frame's hue.
+  const exponent = mix / 100 - 1;
+  const floor = 1 / 512;
+  for (let p = 0, s = 0, n = 0, o = 0; p < pixelCount; p++, s += components, n += 3, o += 4) {
+    let nr = srgbToLinear[neural[n]], ng = srgbToLinear[neural[n + 1]], nb = srgbToLinear[neural[n + 2]];
+    const rr = srgbToLinear[source[s]], rg = srgbToLinear[source[s + 1]], rb = srgbToLinear[source[s + 2]];
+    const neuralLuma = 0.2126 * nr + 0.7152 * ng + 0.0722 * nb;
+    const referenceLuma = 0.2126 * rr + 0.7152 * rg + 0.0722 * rb;
+    const ratio = Math.max(0.5, Math.min(2, (neuralLuma + floor) / (referenceLuma + floor)));
+    const scale = exponent === 1 ? ratio : Math.pow(ratio, exponent);
+    nr *= scale; ng *= scale; nb *= scale;
+    const peak = Math.max(nr, ng, nb);
+    if (peak > 1) { nr /= peak; ng /= peak; nb /= peak; }
+    output[o] = linearToByte(nr); output[o + 1] = linearToByte(ng); output[o + 2] = linearToByte(nb);
+    output[o + 3] = components === 4 ? source[s + 3] : 255;
+  }
+  return output;
+}
+
 async function processSelectedLayer() {
   if (busy) return;
   busy = true;
@@ -298,14 +354,7 @@ async function processSelectedLayer() {
     if (neural.length !== pixelCount * 3)
       throw new Error("The renderer returned the wrong number of pixels.");
     setStatus("Mixing rendered and original pixels…");
-    const output = new Uint8Array(pixelCount * 4);
-    const originalWeight = 100 - mix;
-    for (let p = 0, s = 0, n = 0, o = 0; p < pixelCount; p++, s += components, n += 3, o += 4) {
-      output[o] = mix === 100 ? neural[n] : Math.round((source[s] * originalWeight + neural[n] * mix) / 100);
-      output[o + 1] = mix === 100 ? neural[n + 1] : Math.round((source[s + 1] * originalWeight + neural[n + 1] * mix) / 100);
-      output[o + 2] = mix === 100 ? neural[n + 2] : Math.round((source[s + 2] * originalWeight + neural[n + 2] * mix) / 100);
-      output[o + 3] = components === 4 ? source[s + 3] : 255;
-    }
+    const output = composePixels(source, neural, components, mix, pixelCount);
     setStatus("Adding Smart Object…");
     await insertResult(document.id, layer.id, output, width, height, captured.bounds, name);
     setStatus(`Done: ${name}`, "done");

@@ -21,7 +21,7 @@ globalThis.__dlssDiagnostic = "running";
       finally { pixels.dispose(); }
     }, { commandName: "Create temporary DLSS test" });
     const results = [];
-    for (const mix of [50, 100, 0]) {
+    for (const mix of [50, 100, 200, 0]) {
       await core.executeAsModal(async () => {
         await action.batchPlay([{ _obj: "select", _target: [{ _ref: "layer", _id: sourceId }], makeVisible: false }], {});
       }, { commandName: "Select temporary source" });

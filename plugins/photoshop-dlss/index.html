@@ -78,7 +78,7 @@
     <header class="brand">
       <div class="mark" aria-hidden="true">N</div>
       <div class="brand-text">
-        <p class="eyebrow">Photoshop neural filter · v0.2.3</p>
+        <p class="eyebrow">Photoshop neural filter · v0.2.4</p>
         <h1>DLSS Neural Mix</h1>
       </div>
     </header>
@@ -96,12 +96,12 @@
       <div class="mix-head">
         <h2><label for="mix">Neural mix</label></h2>
         <div class="number-wrap">
-          <input id="mixNumber" type="number" min="0" max="100" value="100" aria-label="Neural mix percentage">
+          <input id="mixNumber" type="number" min="0" max="200" value="100" aria-label="Neural mix percentage">
           <span aria-hidden="true">%</span>
         </div>
       </div>
-      <input id="mix" type="range" min="0" max="100" value="100" aria-label="Neural mix percentage">
-      <div class="range-labels"><span>0% · Original</span><span>100% · Neural</span></div>
+      <input id="mix" type="range" min="0" max="200" value="100" aria-label="Neural mix percentage">
+      <div class="range-labels"><span>0% · Original</span><span>100% · Neural</span><span>200% · Enhanced</span></div>
       <button id="process" type="button">Apply to selected layer</button>
       <p class="result-hint">Creates a new Smart Object and keeps the original</p>
     </section>

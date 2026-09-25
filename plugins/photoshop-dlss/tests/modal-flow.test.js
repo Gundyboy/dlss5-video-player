@@ -108,6 +108,14 @@ controls.get("process").click().then(async () => {
   assert.equal(outputDisposed, true);
   assert.equal(document.activeLayers[0].name, "DLSS - 50% Mix");
   assert.equal(controls.get("status").dataset.state, "done");
+  assert.equal(context.clampMix(250), 200, "Mix must clamp to the renderer's 200% maximum");
+  const enhanced = context.composePixels(
+    new Uint8Array([100, 100, 100, 77]), new Uint8Array([150, 150, 150]), 4, 200, 1);
+  assert.deepEqual(Array.from(enhanced), [205, 205, 205, 77],
+    "200% Mix must use the player's guarded linear-light luminance extension");
+  const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+  assert.match(html, /id="mixNumber"[^>]+max="200"/);
+  assert.match(html, /id="mix"[^>]+max="200"/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
   assert.deepEqual(manifest.requiredPermissions.network.domains, ["http://localhost:47837"]);
   context.fetch = async () => { throw new Error("Permission denied to the url. Manifest entry not found."); };

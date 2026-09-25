@@ -5,6 +5,9 @@ pixel size. Mix blends the verified neural frame with the original RGB pixels.
 Photoshop adds the result above the source as a Smart Object named
 `DLSS - 50% Mix` (with the chosen percentage). The source layer and its alpha
 are retained. At 0%, the plugin duplicates the layer without starting a render.
+Mix runs from 0–200%. From 100–200%, it matches the player's guarded luminance
+ratio extension, preserving the neural frame's hue rather than extrapolating
+RGB channel values past their valid range.
 
 The panel has one strength control, an Apply button, progress, and a bounded
 activity log. Its preferred height is 700 pixels when docked and 760 when
@@ -56,7 +59,7 @@ Run `node tests/modal-flow.test.js` and `powershell -File tests/upgrade.test.ps1
 from this plugin folder for the modal and installer regressions. For a live
 integration check, copy the panel into an isolated development plugin with a
 different plugin ID, include `tests/photoshop-live.js` after `panel.js`, and load
-it through Adobe UXP Developer Tool. It tests 50%, 100%, and 0% in a temporary
+it through Adobe UXP Developer Tool. It tests 50%, 100%, 200%, and 0% in a temporary
 512 × 512 document, verifies Smart Object names and types, then closes only that
 document. Inspect `globalThis.__dlssDiagnostic` in the development console for
 the result. This check uses the real local GPU renderer and may prompt to open
