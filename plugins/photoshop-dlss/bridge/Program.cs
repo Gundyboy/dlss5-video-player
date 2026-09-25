@@ -231,12 +231,19 @@ internal static class Program
 
     private static string PlayerPath()
     {
-        var config = Path.Combine(AppContext.BaseDirectory, "bridge-config.json");
-        if (File.Exists(config))
+        // The installer writes a per-user path. Development builds can still
+        // use the config beside this executable.
+        var configs = new[]
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(config));
-            return document.RootElement.GetProperty("playerPath").GetString()!;
-        }
+            Path.Combine(WorkRoot, "bridge-config.json"),
+            Path.Combine(AppContext.BaseDirectory, "bridge-config.json")
+        };
+        foreach (var config in configs)
+            if (File.Exists(config))
+            {
+                using var document = JsonDocument.Parse(File.ReadAllText(config));
+                return document.RootElement.GetProperty("playerPath").GetString()!;
+            }
         return Environment.GetEnvironmentVariable("DLSS_PHOTOSHOP_PLAYER") ?? "";
     }
 
