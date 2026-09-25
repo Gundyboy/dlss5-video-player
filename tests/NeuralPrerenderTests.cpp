@@ -1000,6 +1000,34 @@ void manifest_round_trip_rejects_partial_duplicate_and_unknown_state_test()
     CHECK(!IsReusableNeuralCacheManifest(manifest));
 }
 
+void manifest_accepts_rendered_still_dimensions_test()
+{
+    auto manifest = CompleteRenderManifest();
+    manifest.state = NeuralCacheState::Complete;
+    manifest.neuralDigest = std::string(64, 'c');
+    manifest.frameCount = 1;
+    manifest.nativeEvaluations = 1;
+    manifest.verifiedNeuralFrames = 1;
+    manifest.duration100ns = 10000000;
+
+    // Both pictures were successfully rendered by the worker in 0.26.0, but
+    // the old 7680x4320 manifest bounds discarded them at publication.
+    for (const auto [width, height] : {std::pair{8000u, 4000u},
+                                       std::pair{5000u, 5000u}}) {
+        manifest.width = width;
+        manifest.height = height;
+        const auto parsed = ParseNeuralCacheManifest(SerializeNeuralCacheManifest(manifest));
+        CHECK(parsed.has_value());
+        if (parsed) CHECK(IsReusableNeuralCacheManifest(*parsed));
+    }
+
+    manifest.width = 16385;
+    CHECK(!IsReusableNeuralCacheManifest(manifest));
+    manifest.width = 8000;
+    manifest.height = 16385;
+    CHECK(!IsReusableNeuralCacheManifest(manifest));
+}
+
 // P1.16: the manifest's JsonEscape wrote "" for a control character without a
 // short form, so the whole field came back as a different, valid value - an
 // environment term of the render identity among them. Every control character
@@ -5747,6 +5775,7 @@ int wmain(int argc, wchar_t* argv[])
     hashed_runtime_set_covers_the_worker_and_the_lock_set_does_not_test();
     runtime_digest_is_order_independent_byte_sensitive_and_rejects_duplicates_test();
     manifest_round_trip_rejects_partial_duplicate_and_unknown_state_test();
+    manifest_accepts_rendered_still_dimensions_test();
     manifest_fields_with_control_characters_round_trip_test();
     source_and_render_promotion_are_hash_validated_and_immutable_test();
     promotion_waits_out_a_transient_lock_and_names_the_failing_step_test();

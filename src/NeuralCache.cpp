@@ -38,8 +38,10 @@ namespace {
 constexpr uint32_t kSchema = 5;
 constexpr uint32_t kLegacySchema = 3;
 constexpr uint32_t kMinDimension = 64;
-constexpr uint32_t kMaxWidth = 7680;
-constexpr uint32_t kMaxHeight = 4320;
+// D3D12 textures and the still-image decoder accept sides up to 16384. A
+// smaller 8K UHD cache limit discarded completed renders such as 8000x4000
+// and 5000x5000 even after the worker and media probe had accepted them.
+constexpr uint32_t kMaxDimension = 16384;
 
 class Sha256Hasher {
 public:
@@ -294,8 +296,8 @@ bool CommonManifestFieldsValid(const NeuralCacheManifest& manifest)
          !manifest.guides.empty() || manifest.jobId != 0 || manifest.historyResets != 0 ||
          !manifest.receiptDigest.empty())) return false;
     if (!EnvironmentValid(manifest)) return false;
-    return manifest.width >= kMinDimension && manifest.width <= kMaxWidth &&
-           manifest.height >= kMinDimension && manifest.height <= kMaxHeight &&
+    return manifest.width >= kMinDimension && manifest.width <= kMaxDimension &&
+           manifest.height >= kMinDimension && manifest.height <= kMaxDimension &&
            manifest.frameCount > 0 && manifest.duration100ns > 0 &&
            !manifest.encoder.empty() && !manifest.upscaling &&
            RangeFieldsValid(manifest.rangeStart100ns, manifest.rangeEnd100ns) &&
