@@ -52,7 +52,9 @@ beside `NeuralWorker.exe`.
 
 ## Windows installer
 
-Run `dist/DLSS-Neural-Mix-Setup-win64.exe` and select the existing unpacked
+Save your work and close Photoshop before running the installer; an open panel
+keeps the previous plugin code loaded. Then run
+`dist/DLSS-Neural-Mix-Setup-win64.exe` and select the existing unpacked
 video player's `DLSSVideoPlayer.exe`. Setup uses that folder only to verify and
 copy the separately licensed neural runtime, FFmpeg, and FFprobe. It installs
 the neural-only runner, worker, bridge, and Photoshop `.ccx`; it does not copy

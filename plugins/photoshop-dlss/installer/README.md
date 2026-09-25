@@ -1,5 +1,9 @@
 # DLSS Neural Mix installer
 
+Save your work and close Photoshop before installing or upgrading. An open panel
+keeps its previously loaded JavaScript even after a newer `.ccx` is installed;
+setup now stops at the file-selection page if Photoshop is still running.
+
 Run `DLSS-Neural-Mix-Setup-win64.exe` and browse to `DLSSVideoPlayer.exe` in an
 unpacked video player folder. Setup verifies the pinned neural runtime in that
 folder and copies its files, FFmpeg, and FFprobe. It installs this project's
@@ -24,7 +28,7 @@ x64 runtime are required. Adobe may ask for plugin permission when the panel
 starts its local bridge.
 
 When upgrading from an older plugin version, close any running
-`DLSSPhotoshopBridge.exe` process before reopening Photoshop. The panel will
+`DLSSPhotoshopBridge.exe` process before starting Photoshop again. The panel will
 identify an old bridge if one is still using the local port.
 
 To validate the selected folder without installing, run

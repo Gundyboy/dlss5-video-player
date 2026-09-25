@@ -7,7 +7,7 @@ Unicode True
 !include "FileFunc.nsh"
 
 !define PRODUCT "DLSS Neural Mix"
-!define VERSION "0.2.1"
+!define VERSION "0.2.2"
 !define STAGE "..\dist\setup"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\DLSSNeuralMix"
 
@@ -18,7 +18,7 @@ RequestExecutionLevel user
 ShowInstDetails show
 ShowUninstDetails show
 SetCompressor /SOLID lzma
-VIProductVersion "0.2.1.0"
+VIProductVersion "0.2.2.0"
 VIAddVersionKey "ProductName" "${PRODUCT}"
 VIAddVersionKey "FileDescription" "${PRODUCT} setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
@@ -71,7 +71,7 @@ Function SelectPlayerPage
   ${NSD_CreateBrowseButton} 81% 32u 19% 13u "Browse..."
   Pop $BrowseButton
   ${NSD_OnClick} $BrowseButton BrowseForPlayer
-  ${NSD_CreateLabel} 0 55u 100% 31u "Setup copies the neural runtime, then installs the small Photoshop runner and plugin for this Windows user."
+  ${NSD_CreateLabel} 0 55u 100% 31u "Save your work and close Photoshop before continuing. Setup then installs the neural runner and plugin for this Windows user."
   Pop $0
   nsDialogs::Show
 FunctionEnd

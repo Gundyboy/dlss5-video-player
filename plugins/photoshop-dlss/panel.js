@@ -2,6 +2,7 @@ const { app, core, action, imaging, constants } = require("photoshop");
 const { entrypoints, shell, storage } = require("uxp");
 
 const endpoint = "http://127.0.0.1:47837";
+const panelVersion = "0.2.2";
 const fs = storage.localFileSystem;
 const slider = document.getElementById("mix");
 const number = document.getElementById("mixNumber");
@@ -25,9 +26,10 @@ function appendLog(message, state = "normal") {
 }
 
 function setStatus(message, state = "working") {
-  status.textContent = message;
+  const detail = state === "error" ? `v${panelVersion}: ${message}` : message;
+  status.textContent = detail;
   status.dataset.state = state;
-  appendLog(message, state);
+  appendLog(detail, state);
 }
 
 function elapsedText(seconds) {
@@ -95,7 +97,7 @@ function stopProgress() {
   progress = null;
 }
 
-appendLog("Ready. Select a layer, choose Mix, then apply.");
+appendLog(`DLSS Neural Mix v${panelVersion} ready. Select a layer, choose Mix, then apply.`);
 function clampMix(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : 100;

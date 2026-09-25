@@ -6,6 +6,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 try {
+if (Get-Process -Name Photoshop -ErrorAction SilentlyContinue) {
+    throw 'Photoshop is still running. Save your work and close Photoshop before continuing; an open panel keeps the previous plugin code loaded.'
+}
 if ($PlayerExePath) {
     if (-not (Test-Path -LiteralPath $PlayerExePath -PathType Leaf)) {
         throw "Selected video player executable not found: $PlayerExePath"
@@ -86,7 +89,7 @@ New-Item -ItemType Directory -Path $bridgeSettings -Force | Out-Null
 
 & $upia /install $package
 if ($LASTEXITCODE -ne 0) { throw "Adobe UPIA installation failed with exit code $LASTEXITCODE." }
-Write-Output 'DLSS Neural Mix installed. Close any old DLSSPhotoshopBridge.exe process, restart Photoshop, then open Plugins > DLSS Neural Mix.'
+Write-Output 'DLSS Neural Mix installed. Start Photoshop, then open Plugins > DLSS Neural Mix. Close any old DLSSPhotoshopBridge.exe process if the panel asks.'
 } catch {
     Write-Output ('ERROR: ' + $_.Exception.Message)
     exit 1
