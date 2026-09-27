@@ -54,12 +54,6 @@ foreach ($entry in $lock.entries) {
     if ($actual -ne $entry.sha256) { throw "Runtime version mismatch: $file" }
 }
 
-$dotnet = Join-Path $programFiles64 'dotnet\dotnet.exe'
-if (-not (Test-Path -LiteralPath $dotnet -PathType Leaf) -or
-    -not ((& $dotnet --list-runtimes) -match '^Microsoft\.NETCore\.App 3\.1\.')) {
-    throw 'The .NET Core 3.1 x64 runtime is required for the local bridge.'
-}
-
 Write-Output "Verified neural runtime: $source"
 if ($ValidateOnly) { Write-Output 'Validation passed; no files were installed.'; exit 0 }
 Stop-DlssBridgeForUpgrade

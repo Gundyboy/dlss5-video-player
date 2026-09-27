@@ -2,7 +2,8 @@ param(
     [string]$RunnerPath = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path 'build-upscaling\Release\DLSSPhotoshopNeural.exe'),
     [string]$WorkerPath = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path 'build-upscaling\Release\neural-runtime\NeuralWorker.exe'),
     [string]$CcxFile,
-    [string]$NsisCompiler
+    [string]$NsisCompiler,
+    [string]$DotnetPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,10 +12,11 @@ $repo = (Resolve-Path (Join-Path $plugin '..\..')).Path
 $dist = Join-Path $plugin 'dist'
 $uxp = Join-Path $dist 'uxp'
 $setup = Join-Path $dist 'setup'
+$bridgeBuild = Join-Path $dist 'bridge-build'
 
 # Recreate generated staging folders so repeated builds cannot package stale files.
 $distPath = [IO.Path]::GetFullPath($dist)
-foreach ($stagePath in @($uxp, $setup)) {
+foreach ($stagePath in @($uxp, $setup, $bridgeBuild)) {
     $fullPath = [IO.Path]::GetFullPath($stagePath)
     if (-not $fullPath.StartsWith($distPath + [IO.Path]::DirectorySeparatorChar,
             [StringComparison]::OrdinalIgnoreCase)) {
@@ -31,10 +33,19 @@ if (-not (Test-Path -LiteralPath $RunnerPath -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $WorkerPath -PathType Leaf)) {
     throw "Build the NeuralWorker target first: $WorkerPath"
 }
-$bridgeBuild = Join-Path $dist 'bridge-build'
+$bundledDotnet = Join-Path $dist 'toolchain\dotnet\dotnet.exe'
+if (-not $DotnetPath) {
+    if (Test-Path -LiteralPath $bundledDotnet -PathType Leaf) { $DotnetPath = $bundledDotnet }
+    else { $DotnetPath = (Get-Command dotnet -ErrorAction Stop).Source }
+}
+$sdkVersion = & $DotnetPath --version
+if ($LASTEXITCODE -ne 0 -or $sdkVersion -notmatch '^(\d+)\.' -or [int]$Matches[1] -lt 10) {
+    throw 'The bridge build requires the .NET 10 SDK or newer. Pass -DotnetPath <path-to-dotnet.exe>.'
+}
 $env:DOTNET_CLI_HOME = Join-Path $plugin '.dotnet'
 $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
-dotnet publish (Join-Path $plugin 'bridge\DLSSPhotoshopBridge.csproj') -c Release -o $bridgeBuild
+& $DotnetPath publish (Join-Path $plugin 'bridge\DLSSPhotoshopBridge.csproj') -c Release -r win-x64 --self-contained true `
+    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o $bridgeBuild
 if ($LASTEXITCODE -ne 0) { throw 'The bridge build failed.' }
 
 # Only the open-source panel, bridge, neural runner and worker are packaged here.
@@ -45,9 +56,21 @@ foreach ($name in @('manifest.json', 'index.html', 'panel.js')) {
     Copy-Item -LiteralPath (Join-Path $plugin $name) -Destination (Join-Path $uxp $name) -Force
 }
 Copy-Item -LiteralPath (Join-Path $plugin 'icons') -Destination (Join-Path $uxp 'icons') -Recurse -Force
-foreach ($name in @('DLSSPhotoshopBridge.exe', 'DLSSPhotoshopBridge.dll',
-        'DLSSPhotoshopBridge.deps.json', 'DLSSPhotoshopBridge.runtimeconfig.json')) {
-    Copy-Item -LiteralPath (Join-Path $bridgeBuild $name) -Destination (Join-Path $uxp "native\$name") -Force
+if (-not (Test-Path -LiteralPath (Join-Path $bridgeBuild 'DLSSPhotoshopBridge.exe') -PathType Leaf)) {
+    throw 'The self-contained bridge executable is missing from the publish output.'
+}
+foreach ($file in Get-ChildItem -LiteralPath $bridgeBuild -File) {
+    if ($file.Extension -ne '.pdb') {
+        Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $uxp 'native') -Force
+    }
+}
+$dotnetRoot = Split-Path -Parent (Resolve-Path -LiteralPath $DotnetPath).Path
+foreach ($notice in @('LICENSE.txt', 'ThirdPartyNotices.txt')) {
+    $noticePath = Join-Path $dotnetRoot $notice
+    if (-not (Test-Path -LiteralPath $noticePath -PathType Leaf)) {
+        throw "The .NET redistribution notice is missing: $noticePath"
+    }
+    Copy-Item -LiteralPath $noticePath -Destination (Join-Path $uxp "native\DOTNET-$notice") -Force
 }
 foreach ($name in @('Install.ps1', 'Upgrade.ps1', 'Install.cmd', 'Uninstall.ps1', 'README.md')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $setup $name) -Force

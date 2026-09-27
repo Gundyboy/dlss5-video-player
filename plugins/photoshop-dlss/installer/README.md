@@ -23,15 +23,15 @@ hashes. It copies those already-present files into
 `%LOCALAPPDATA%\DLSSNeuralMix\Renderer`; the setup executable does not contain
 or redistribute them. The Photoshop runner uses its own packaged ReShade
 configuration, with the model at the layer's native resolution. Adobe Photoshop
-2025 or newer, Creative Cloud Desktop/UPIA, an RTX GPU, and the .NET Core 3.1
-x64 runtime are required. Adobe may ask for plugin permission when the panel
-starts its local bridge.
+2025 or newer, Creative Cloud Desktop/UPIA, and an RTX GPU are required. The
+Windows x64 bridge bundles its .NET runtime; users do not need to install .NET.
+Adobe may ask for plugin permission when the panel starts its local bridge.
 
 Setup stops the previous idle renderer bridge. After Adobe installs and setup
 verifies the new plugin, setup archives older copies outside Adobe's plugin
 search folder. Photoshop can otherwise keep choosing v0.2.0 even after a restart.
 Backups are retained in `%LOCALAPPDATA%\DLSSNeuralMix\PluginBackups`.
-The panel header and activity log show v0.2.6 after this update.
+The panel header and activity log show v0.2.7 after this update.
 
 To validate the selected folder without installing, run
 `Install.ps1 -ValidateOnly -PlayerExePath <path>`. Uninstall DLSS Neural Mix
@@ -41,8 +41,10 @@ binaries; saved settings and the last render cache are retained.
 This is an independent Windows package, not a Marketplace release. See
 `payload\THIRD_PARTY.md` for the runtime's separate terms and provenance.
 
-To rebuild, compile the `DLSSPhotoshopNeural` CMake target, then run
+To rebuild, install the .NET 10 SDK, compile the `DLSSPhotoshopNeural` CMake
+target, then run
 `Build-Installer.ps1` to stage the package. Package `dist\uxp\manifest.json`
 as a `.ccx` with Adobe UXP Developer Tool, then run
 `Build-Installer.ps1 -CcxFile <path-to-ccx> -NsisCompiler <path-to-makensis.exe>`.
-This creates the setup EXE and manual ZIP under `dist`.
+This publishes the bridge as a self-contained single executable and creates
+the setup EXE and manual ZIP under `dist`.

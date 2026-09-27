@@ -7,6 +7,14 @@ redistribute components under separate terms. No upstream endorsement is
 claimed. Exact packaged binaries are pinned in `packaging/runtime-lock.json` and
 `packaging/tool-lock.json`.
 
+## Microsoft .NET runtime (Photoshop bridge)
+
+The Photoshop plugin bundles the Windows x64 .NET 10 runtime inside its
+self-contained bridge executable. Microsoft's redistribution license and
+third-party notices are included in the plugin's `native` folder as
+`DOTNET-LICENSE.txt` and `DOTNET-ThirdPartyNotices.txt`. The bundled runtime is
+used only by the local Photoshop bridge; the video player does not require it.
+
 ## NVIDIA DLSS / NGX
 
 Source and terms: https://github.com/NVIDIA/DLSS

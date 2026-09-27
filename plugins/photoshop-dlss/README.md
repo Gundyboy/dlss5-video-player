@@ -51,7 +51,8 @@ After building the installer staging files, run
 `plugins/photoshop-dlss/runner/Smoke-Test.ps1` for an isolated GPU test. It
 renders one frame from a folder without the full player executable.
 
-The bridge needs the local .NET Core 3.1 x64 runtime. The bridge log is
+The packaged bridge includes its .NET runtime, so the recipient does not need
+to install .NET separately. The bridge log is
 `%LOCALAPPDATA%\DLSSPhotoshopBridge\bridge.log`; the worker's own log stays
 beside `NeuralWorker.exe`.
 
