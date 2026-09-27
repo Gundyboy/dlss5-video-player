@@ -65,6 +65,7 @@
     }
     .log-entry { margin-bottom: 5px; overflow-wrap: anywhere; white-space: pre-wrap; }
     .log-entry[data-state="error"], .log-entry[data-state="done"] { font-weight: 700; }
+    .credit { flex: 0 0 auto; margin-top: 12px; text-align: center; opacity: .55; font-size: 10px; }
     @media (max-width: 300px) {
       .panel { padding: 11px; }
       .card { padding: 11px; }
@@ -78,7 +79,7 @@
     <header class="brand">
       <div class="mark" aria-hidden="true">N</div>
       <div class="brand-text">
-        <p class="eyebrow">Photoshop neural filter · v0.2.5</p>
+        <p class="eyebrow">Photoshop neural filter · v0.2.6</p>
         <h1>DLSS Neural Mix</h1>
       </div>
     </header>
@@ -110,6 +111,7 @@
     <div id="status" role="status" aria-live="polite" data-state="ready">Ready. Select a layer, choose Mix, then apply.</div>
     <p class="log-heading">Activity log</p>
     <div id="log" role="log" aria-live="polite" aria-label="Processing activity"></div>
+    <footer class="credit">Made by Will</footer>
   </main>
   <script src="panel.js"></script>
 </body>

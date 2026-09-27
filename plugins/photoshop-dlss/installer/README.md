@@ -31,7 +31,7 @@ Setup stops the previous idle renderer bridge. After Adobe installs and setup
 verifies the new plugin, setup archives older copies outside Adobe's plugin
 search folder. Photoshop can otherwise keep choosing v0.2.0 even after a restart.
 Backups are retained in `%LOCALAPPDATA%\DLSSNeuralMix\PluginBackups`.
-The panel header and activity log show v0.2.5 after this update.
+The panel header and activity log show v0.2.6 after this update.
 
 To validate the selected folder without installing, run
 `Install.ps1 -ValidateOnly -PlayerExePath <path>`. Uninstall DLSS Neural Mix
