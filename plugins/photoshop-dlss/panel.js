@@ -3,7 +3,7 @@ const { entrypoints, shell, storage } = require("uxp");
 
 // UXP's manifest allowlist rejects numeric loopback addresses in Photoshop.
 const endpoint = "http://localhost:47837";
-const panelVersion = "0.2.8";
+const panelVersion = "0.2.9";
 const fs = storage.localFileSystem;
 const slider = document.getElementById("mix");
 const number = document.getElementById("mixNumber");
@@ -169,9 +169,9 @@ async function captureSelectedLayer(documentId, layerId) {
         current.activeLayers.length !== 1 || current.activeLayers[0].id !== layerId)
       throw new Error("The selected document or layer changed before capture.");
     const selected = current.activeLayers[0];
-    async function readPixels(readLayerId) {
+    async function readPixels(readDocumentId, readLayerId) {
       const captured = await imaging.getPixels({
-        documentID: documentId,
+        documentID: readDocumentId,
         layerID: readLayerId,
         componentSize: 8,
         colorSpace: "RGB",
@@ -200,17 +200,53 @@ async function captureSelectedLayer(documentId, layerId) {
       }
     }
     try {
-      return await readPixels(layerId);
+      return await readPixels(documentId, layerId);
     } catch (error) {
       if (!/could not update smart object files/i.test(String(error))) throw error;
+      if (selected.kind === constants.LayerKind.NORMAL) {
+        appendLog("The layered document blocked pixel capture; isolating the selected pixel layer.");
+        const originalBounds = selected.boundsNoEffects;
+        const layerWidth = originalBounds.right - originalBounds.left;
+        const layerHeight = originalBounds.bottom - originalBounds.top;
+        if (layerWidth > 8192 || layerHeight > 8192 || layerWidth * layerHeight > 64000000)
+          throw new Error(`The selected layer is ${layerWidth} × ${layerHeight} pixels. DLSS Neural Rendering supports up to 8192 pixels per side and 64 megapixels.`);
+        if (current.width > 8192 || current.height > 8192 || current.width * current.height > 64000000)
+          throw new Error("The document canvas is too large for isolated capture. Use a smaller canvas for this layer.");
+        let scratch;
+        try {
+          scratch = await app.createDocument({
+            width: current.width, height: current.height, resolution: current.resolution,
+            mode: "RGBColorMode", fill: "transparent", depth: 8,
+            name: "DLSS temporary layer capture"
+          });
+          const copy = await selected.duplicate(scratch);
+          for (const other of [...scratch.layers])
+            if (other.id !== copy.id) await other.delete();
+          const isolated = await readPixels(scratch.id, copy.id);
+          if (isolated.width !== layerWidth || isolated.height !== layerHeight)
+            throw new Error("The selected layer changed size when isolated for capture.");
+          isolated.bounds = originalBounds;
+          return isolated;
+        } catch (fallbackError) {
+          throw new Error("Photoshop could not read the selected pixel layer, even in an isolated document. Photoshop reported: " + String(fallbackError));
+        } finally {
+          try {
+            if (scratch) await scratch.closeWithoutSaving();
+          } finally {
+            app.activeDocument = current;
+            if (current.activeLayers.length !== 1 || current.activeLayers[0].id !== layerId)
+              await action.batchPlay([{ _obj: "select", _target: [{ _ref: "layer", _id: layerId }], makeVisible: false }], {});
+          }
+        }
+      }
       if (selected.kind !== constants.LayerKind.SMARTOBJECT)
-        throw new Error("Photoshop could not read this layer. Check the document for missing linked Smart Objects, or try a new document with one pixel layer. Photoshop reported: " + String(error));
+        throw new Error("Photoshop could not read this layer type. Select a flattened pixel layer and retry. Photoshop reported: " + String(error));
       appendLog("Photoshop could not read the Smart Object directly; trying a temporary rasterized copy.");
       let temporary;
       try {
         temporary = await selected.duplicate();
         await temporary.rasterize(constants.RasterizeType.ENTIRELAYER);
-        return await readPixels(temporary.id);
+        return await readPixels(documentId, temporary.id);
       } catch (fallbackError) {
         throw new Error("Photoshop could not read this Smart Object, even from a temporary rasterized copy. Relink any missing source file in the Layers panel, then retry. Photoshop reported: " + String(fallbackError));
       } finally {

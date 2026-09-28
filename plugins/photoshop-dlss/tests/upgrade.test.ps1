@@ -33,12 +33,13 @@ $null = Add-Plugin '0.2.4'
 $null = Add-Plugin '0.2.5'
 $null = Add-Plugin '0.2.6'
 $null = Add-Plugin '0.2.7'
-$current = Add-Plugin '0.2.8'
+$null = Add-Plugin '0.2.8'
+$current = Add-Plugin '0.2.9'
 $unrelated = Add-Plugin '0.1.0' 'com.example.unrelated'
 $impostor = Add-Plugin '0.0.1'
 @{ id = 'com.example.unrelated'; version = '0.0.1' } | ConvertTo-Json |
     Set-Content (Join-Path $impostor 'manifest.json')
-$identity = [pscustomobject]@{ Id = $id; Version = '0.2.8'; PanelHash = 'WRONG' }
+$identity = [pscustomobject]@{ Id = $id; Version = '0.2.9'; PanelHash = 'WRONG' }
 Expect-Failure { Move-ObsoleteDlssPlugins $external $backups $identity } 'expected plugin files'
 Assert (Test-Path $old) 'A failed installation must preserve the old plugin.'
 $identity.PanelHash = (Get-FileHash (Join-Path $current 'panel.js') -Algorithm SHA256).Hash
@@ -50,7 +51,7 @@ Assert (Test-Path $current) 'The new plugin must stay installed.'
 Assert (Test-Path $unrelated) 'Unrelated plugins must remain untouched.'
 Assert (Test-Path $impostor) 'A folder name alone must not establish plugin ownership.'
 $archived = @(Get-ChildItem $backups -Directory | Get-ChildItem -Directory)
-Assert ($archived.Count -eq 8) 'All eight obsolete versions must be backed up.'
+Assert ($archived.Count -eq 9) 'All nine obsolete versions must be backed up.'
 Assert ((Get-FileHash (Join-Path $archived[0].FullName 'panel.js')).Hash -eq $identity.PanelHash) 'Backup content changed.'
 Move-ObsoleteDlssPlugins $external $backups $identity
 Assert (@(Get-ChildItem $backups -Directory).Count -eq 1) 'Repeated cleanup should be a no-op.'
