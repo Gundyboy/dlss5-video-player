@@ -23,15 +23,16 @@ hashes. It copies those already-present files into
 `%LOCALAPPDATA%\DLSSNeuralMix\Renderer`; the setup executable does not contain
 or redistribute them. The Photoshop runner uses its own packaged ReShade
 configuration, with the model at the layer's native resolution. Adobe Photoshop
-2025 or newer, Creative Cloud Desktop/UPIA, and an RTX GPU are required. The
+2024 (version 25) or newer, Creative Cloud Desktop/UPIA, and an RTX GPU are required. The
 Windows x64 bridge bundles its .NET runtime; users do not need to install .NET.
 Adobe may ask for plugin permission when the panel starts its local bridge.
+The bridge starts in the background without opening a console window.
 
 Setup stops the previous idle renderer bridge. After Adobe installs and setup
 verifies the new plugin, setup archives older copies outside Adobe's plugin
 search folder. Photoshop can otherwise keep choosing v0.2.0 even after a restart.
 Backups are retained in `%LOCALAPPDATA%\DLSSNeuralMix\PluginBackups`.
-The panel header and activity log show v0.2.7 after this update.
+The panel header and activity log show v0.2.8 after this update.
 
 To validate the selected folder without installing, run
 `Install.ps1 -ValidateOnly -PlayerExePath <path>`. Uninstall DLSS Neural Mix

@@ -3,7 +3,7 @@ const { entrypoints, shell, storage } = require("uxp");
 
 // UXP's manifest allowlist rejects numeric loopback addresses in Photoshop.
 const endpoint = "http://localhost:47837";
-const panelVersion = "0.2.7";
+const panelVersion = "0.2.8";
 const fs = storage.localFileSystem;
 const slider = document.getElementById("mix");
 const number = document.getElementById("mixNumber");
@@ -168,33 +168,58 @@ async function captureSelectedLayer(documentId, layerId) {
     if (!current || current.id !== documentId ||
         current.activeLayers.length !== 1 || current.activeLayers[0].id !== layerId)
       throw new Error("The selected document or layer changed before capture.");
-    const captured = await imaging.getPixels({
-      documentID: documentId,
-      layerID: layerId,
-      componentSize: 8,
-      colorSpace: "RGB",
-      colorProfile: "sRGB IEC61966-2.1",
-      applyAlpha: false
-    });
+    const selected = current.activeLayers[0];
+    async function readPixels(readLayerId) {
+      const captured = await imaging.getPixels({
+        documentID: documentId,
+        layerID: readLayerId,
+        componentSize: 8,
+        colorSpace: "RGB",
+        colorProfile: "sRGB IEC61966-2.1",
+        applyAlpha: false
+      });
+      try {
+        const width = captured.imageData.width;
+        const height = captured.imageData.height;
+        if (width < 64 || height < 64)
+          throw new Error("DLSS Neural Rendering needs at least 64 × 64 pixels in the selected layer.");
+        if (width > 8192 || height > 8192)
+          throw new Error(`The selected layer is ${width} × ${height} pixels. DLSS Neural Rendering supports up to 8192 pixels per side. Resize the selected layer first.`);
+        const pixelCount = width * height;
+        if (!pixelCount || pixelCount > 64000000)
+          throw new Error("The selected layer is empty or exceeds 64 megapixels.");
+        const components = captured.imageData.components;
+        if (components !== 3 && components !== 4)
+          throw new Error("This layer could not be read as RGB pixels.");
+        const source = await captured.imageData.getData({ chunky: true });
+        if (source.length !== pixelCount * components)
+          throw new Error("Photoshop returned an incomplete pixel buffer for this layer.");
+        return { width, height, source, components, bounds: captured.sourceBounds };
+      } finally {
+        captured.imageData.dispose();
+      }
+    }
     try {
-      const width = captured.imageData.width;
-      const height = captured.imageData.height;
-      if (width < 64 || height < 64)
-        throw new Error("DLSS Neural Rendering needs at least 64 × 64 pixels in the selected layer.");
-      if (width > 8192 || height > 8192)
-        throw new Error(`The selected layer is ${width} × ${height} pixels. DLSS Neural Rendering supports up to 8192 pixels per side. Resize the selected layer first.`);
-      const pixelCount = width * height;
-      if (!pixelCount || pixelCount > 64000000)
-        throw new Error("The selected layer is empty or exceeds 64 megapixels.");
-      const components = captured.imageData.components;
-      if (components !== 3 && components !== 4)
-        throw new Error("This layer could not be read as RGB pixels.");
-      const source = await captured.imageData.getData({ chunky: true });
-      if (source.length !== pixelCount * components)
-        throw new Error("Photoshop returned an incomplete pixel buffer for this layer.");
-      return { width, height, source, components, bounds: captured.sourceBounds };
-    } finally {
-      captured.imageData.dispose();
+      return await readPixels(layerId);
+    } catch (error) {
+      if (!/could not update smart object files/i.test(String(error))) throw error;
+      if (selected.kind !== constants.LayerKind.SMARTOBJECT)
+        throw new Error("Photoshop could not read this layer. Check the document for missing linked Smart Objects, or try a new document with one pixel layer. Photoshop reported: " + String(error));
+      appendLog("Photoshop could not read the Smart Object directly; trying a temporary rasterized copy.");
+      let temporary;
+      try {
+        temporary = await selected.duplicate();
+        await temporary.rasterize(constants.RasterizeType.ENTIRELAYER);
+        return await readPixels(temporary.id);
+      } catch (fallbackError) {
+        throw new Error("Photoshop could not read this Smart Object, even from a temporary rasterized copy. Relink any missing source file in the Layers panel, then retry. Photoshop reported: " + String(fallbackError));
+      } finally {
+        try {
+          if (temporary) await temporary.delete();
+        } finally {
+          await action.batchPlay([{ _obj: "select", _target: [{ _ref: "layer", _id: layerId }], makeVisible: false }], {});
+        }
+      }
     }
   }, { commandName: "Read selected layer" });
 }
@@ -316,6 +341,7 @@ async function processSelectedLayer() {
     number.value = slider.value = String(mix);
     const { document, layer } = selectedLayer();
     const name = `DLSS - ${mix}% Mix`;
+    appendLog(`Selected layer: ${layer.name} (${layer.kind})`);
     if (mix === 0) {
       setStatus("Creating Smart Object…");
       await duplicateAtZero(document.id, layer.id, name);

@@ -21,7 +21,29 @@ let renders = 0;
 let capturedDisposed = false;
 let outputDisposed = false;
 let insertedPixels;
+let smartCopyDeleted = false;
+let smartRasterized = false;
+let failRasterRead = false;
 const original = { id: 1, opacity: 100, blendMode: "normal" };
+const smartOriginal = {
+  id: 4, name: "Linked artwork", kind: "smartObject", opacity: 100, blendMode: "normal",
+  async duplicate() {
+    assert.equal(modalDepth, 1);
+    const copy = {
+      id: 5,
+      async rasterize(target) {
+        assert.equal(target, "entireLayer");
+        smartRasterized = true;
+      },
+      async delete() {
+        assert.equal(modalDepth, 1);
+        smartCopyDeleted = true;
+      }
+    };
+    document.activeLayers = [copy];
+    return copy;
+  }
+};
 const document = {
   id: 7,
   activeLayers: [original],
@@ -32,7 +54,11 @@ const document = {
 };
 const photoshop = {
   app: { activeDocument: document },
-  constants: { ElementPlacement: { PLACEBEFORE: "before" } },
+  constants: {
+    ElementPlacement: { PLACEBEFORE: "before" },
+    LayerKind: { SMARTOBJECT: "smartObject" },
+    RasterizeType: { ENTIRELAYER: "entireLayer" }
+  },
   core: {
     async executeAsModal(callback) {
       assert.equal(modalDepth, 0, "modal scopes must not nest");
@@ -42,15 +68,22 @@ const photoshop = {
     }
   },
   action: {
-    async batchPlay() {
+    async batchPlay(commands) {
       assert.equal(modalDepth, 1);
-      document.activeLayers = [{ id: 3, name: "Smart Object" }];
+      if (commands.some(command => command._obj === "newPlacedLayer"))
+        document.activeLayers = [{ id: 3, name: "Smart Object" }];
+      else if (commands[0]._target[0]._id === smartOriginal.id)
+        document.activeLayers = [smartOriginal];
     }
   },
   imaging: {
-    async getPixels() {
+    async getPixels({ layerID }) {
       assert.equal(modalDepth, 1, "pixel capture needs a modal scope");
       captures++;
+      if (layerID === smartOriginal.id)
+        throw new Error("Photoshop Error. Code: -1. Message: Could not update smart object files ^0.");
+      if (layerID === 5 && failRasterRead)
+        throw new Error("Photoshop could not rasterize the missing linked file.");
       return {
         sourceBounds: { left: 4, top: 6 },
         imageData: {
@@ -108,6 +141,22 @@ controls.get("process").click().then(async () => {
   assert.equal(outputDisposed, true);
   assert.equal(document.activeLayers[0].name, "DLSS - 50% Mix");
   assert.equal(controls.get("status").dataset.state, "done");
+  document.activeLayers = [smartOriginal];
+  await controls.get("process").click();
+  assert.equal(captures, 3, "a failed Smart Object read should retry on the temporary raster layer");
+  assert.equal(renders, 2);
+  assert.equal(smartRasterized, true);
+  assert.equal(smartCopyDeleted, true, "the temporary layer must be removed");
+  assert.equal(document.activeLayers[0].name, "DLSS - 50% Mix");
+  assert.equal(controls.get("status").dataset.state, "done");
+  failRasterRead = true;
+  smartCopyDeleted = false;
+  document.activeLayers = [smartOriginal];
+  await controls.get("process").click();
+  assert.equal(smartCopyDeleted, true, "a failed fallback must remove its temporary layer");
+  assert.equal(document.activeLayers[0].id, smartOriginal.id, "a failed fallback must reselect the source");
+  assert.equal(renders, 2, "a failed capture must never reach the renderer");
+  assert.match(controls.get("status").textContent, /Relink any missing source file/);
   assert.equal(context.clampMix(250), 200, "Mix must clamp to the renderer's 200% maximum");
   const enhanced = context.composePixels(
     new Uint8Array([100, 100, 100, 77]), new Uint8Array([150, 150, 150]), 4, 200, 1);
