@@ -22,9 +22,11 @@ let capturedDisposed = false;
 let outputDisposed = false;
 let insertedPixels;
 let insertedBounds;
-let smartCopyDeleted = false;
 let smartRasterized = false;
 let failRasterRead = false;
+let rasterFails = false;
+let toolModal = false;
+let toolCommits = 0;
 let layeredReadFails = false;
 let isolatedReadFails = false;
 let scratchClosed = 0;
@@ -43,20 +45,20 @@ const original = {
 };
 const smartOriginal = {
   id: 4, name: "Linked artwork", kind: "smartObject", opacity: 100, blendMode: "normal",
-  async duplicate() {
+  boundsNoEffects: { left: 4, top: 6, right: 68, bottom: 70 },
+  async duplicate(target) {
     assert.equal(modalDepth, 1);
+    assert.equal(target.id, 8, "Smart Objects should be isolated outside the source document");
     const copy = {
       id: 5,
       async rasterize(target) {
         assert.equal(target, "entireLayer");
+        if (rasterFails) throw new Error("Could not rasterize ^0.");
         smartRasterized = true;
-      },
-      async delete() {
-        assert.equal(modalDepth, 1);
-        smartCopyDeleted = true;
       }
     };
-    document.activeLayers = [copy];
+    target.layers.unshift(copy);
+    target.activeLayers = [copy];
     return copy;
   }
 };
@@ -96,6 +98,12 @@ const photoshop = {
     RasterizeType: { ENTIRELAYER: "entireLayer" }
   },
   core: {
+    async getActiveTool() { return { title: toolModal ? "Free Transform" : "Move Tool", isModal: toolModal }; },
+    async endModalToolState(commit) {
+      assert.equal(commit, true);
+      toolCommits++;
+      toolModal = false;
+    },
     async executeAsModal(callback) {
       assert.equal(modalDepth, 0, "modal scopes must not nest");
       modalDepth++;
@@ -124,8 +132,8 @@ const photoshop = {
         throw new Error("Isolated layer capture failed.");
       if (layerID === smartOriginal.id)
         throw new Error("Photoshop Error. Code: -1. Message: Could not update smart object files ^0.");
-      if (layerID === 5 && failRasterRead)
-        throw new Error("Photoshop could not rasterize the missing linked file.");
+      if (layerID === 5 && failRasterRead && !smartRasterized)
+        throw new Error("Photoshop Error. Code: -1. Message: Could not update smart object files ^0.");
       return {
         sourceBounds: { left: 4, top: 6 },
         imageData: {
@@ -189,36 +197,48 @@ controls.get("process").click().then(async () => {
   await controls.get("process").click();
   assert.equal(captures, 3, "a failed Smart Object read should retry on the temporary raster layer");
   assert.equal(renders, 2);
-  assert.equal(smartRasterized, true);
-  assert.equal(smartCopyDeleted, true, "the temporary layer must be removed");
+  assert.equal(smartRasterized, false, "a readable isolated Smart Object must not be rasterized");
+  assert.equal(scratchClosed, 1, "the temporary Smart Object document must close");
   assert.equal(document.activeLayers[0].name, "DLSS - 50% Mix");
   assert.equal(controls.get("status").dataset.state, "done");
   failRasterRead = true;
-  smartCopyDeleted = false;
+  rasterFails = true;
   document.activeLayers = [smartOriginal];
   await controls.get("process").click();
-  assert.equal(smartCopyDeleted, true, "a failed fallback must remove its temporary layer");
+  assert.equal(scratchClosed, 2, "a failed fallback must close its temporary document");
   assert.equal(document.activeLayers[0].id, smartOriginal.id, "a failed fallback must reselect the source");
   assert.equal(renders, 2, "a failed capture must never reach the renderer");
-  assert.match(controls.get("status").textContent, /Relink any missing source file/);
+  assert.match(controls.get("status").textContent, /Could not rasterize/);
+  rasterFails = false;
+  document.activeLayers = [smartOriginal];
+  await controls.get("process").click();
+  assert.equal(smartRasterized, true, "the isolated Smart Object should be rasterized only after its read fails");
+  assert.equal(scratchClosed, 3);
+  assert.equal(renders, 3);
   layeredReadFails = true;
   document.activeLayers = [original];
   await controls.get("process").click();
-  assert.equal(scratchClosed, 1, "the isolated document must close after capture");
-  assert.equal(starterDeleted, 1, "the isolated document must contain only the selected layer");
+  assert.equal(scratchClosed, 4, "the isolated document must close after capture");
+  assert.equal(starterDeleted, 4, "the isolated document must contain only the selected layer");
   assert.equal(photoshop.app.activeDocument, document);
-  assert.equal(renders, 3, "the isolated pixel layer should reach the renderer");
+  assert.equal(renders, 4, "the isolated pixel layer should reach the renderer");
   assert.equal(insertedBounds.left, 4, "the result must keep the source layer's offset");
   assert.equal(insertedBounds.top, 6);
   assert.equal(document.activeLayers[0].name, "DLSS - 50% Mix");
   isolatedReadFails = true;
   document.activeLayers = [original];
   await controls.get("process").click();
-  assert.equal(scratchClosed, 2, "a failed isolated read must close its temporary document");
+  assert.equal(scratchClosed, 5, "a failed isolated read must close its temporary document");
   assert.equal(photoshop.app.activeDocument, document);
   assert.equal(document.activeLayers[0].id, original.id);
-  assert.equal(renders, 3, "an isolated read failure must not start rendering");
+  assert.equal(renders, 4, "an isolated read failure must not start rendering");
   assert.match(controls.get("status").textContent, /even in an isolated document/);
+  layeredReadFails = false;
+  toolModal = true;
+  document.activeLayers = [original];
+  await controls.get("process").click();
+  assert.equal(toolCommits, 1, "an active Photoshop tool edit must be committed before capture");
+  assert.equal(renders, 5);
   assert.equal(context.clampMix(250), 200, "Mix must clamp to the renderer's 200% maximum");
   const enhanced = context.composePixels(
     new Uint8Array([100, 100, 100, 77]), new Uint8Array([150, 150, 150]), 4, 200, 1);

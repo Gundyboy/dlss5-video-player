@@ -36,14 +36,14 @@ The panel reads RGB pixels at 8 bits per component. A layer must be at least
 Photoshop converts other document modes to sRGB for this pass. The worker
 accepts an opaque still image; the plugin restores the selected layer's alpha
 after neural rendering.
-If Photoshop cannot read a selected Smart Object, the panel tries a temporary
-rasterized copy and removes it after capture. A missing linked source may still
-need to be relinked in Photoshop. The layer name and type appear in the activity
-log to help diagnose document-specific failures.
-If Photoshop reports a Smart Object update error while reading a selected pixel
-layer in a layered document, the panel retries that layer in a temporary RGB
-document containing only its duplicate. It closes the temporary document after
-capture and returns to the source document before rendering.
+The panel commits an active Photoshop tool edit before reading the selected
+layer. If Photoshop reports a Smart Object update error, the panel retries the
+selected Smart Object or pixel layer in a temporary RGB document containing
+only its duplicate. It rasterizes that temporary copy only if Photoshop still
+cannot read the Smart Object. The temporary document closes after capture and
+the source document is restored before rendering. A missing linked source may
+still need to be relinked in Photoshop. The layer name and type appear in the
+activity log to help diagnose document-specific failures.
 
 ## Local development
 

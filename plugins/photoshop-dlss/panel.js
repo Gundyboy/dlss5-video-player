@@ -3,7 +3,7 @@ const { entrypoints, shell, storage } = require("uxp");
 
 // UXP's manifest allowlist rejects numeric loopback addresses in Photoshop.
 const endpoint = "http://localhost:47837";
-const panelVersion = "0.2.9";
+const panelVersion = "0.2.10";
 const fs = storage.localFileSystem;
 const slider = document.getElementById("mix");
 const number = document.getElementById("mixNumber");
@@ -160,6 +160,18 @@ function selectedLayer() {
   return { document, layer: document.activeLayers[0] };
 }
 
+async function finishActiveToolEdit() {
+  const tool = await core.getActiveTool();
+  appendLog(`Photoshop tool: ${tool.title || tool.key || tool.classID || "unknown"}${tool.isModal ? " (editing)" : ""}`);
+  if (!tool.isModal) return;
+  try {
+    await core.endModalToolState(true);
+  } catch (error) {
+    throw new Error("Finish the current Photoshop tool edit before applying DLSS. Photoshop reported: " + String(error));
+  }
+  appendLog("Committed the active Photoshop tool edit.");
+}
+
 async function captureSelectedLayer(documentId, layerId) {
   // Photoshop requires the imaging read to run inside a modal scope. Copy the
   // pixels and release that scope before the potentially long neural render.
@@ -203,57 +215,50 @@ async function captureSelectedLayer(documentId, layerId) {
       return await readPixels(documentId, layerId);
     } catch (error) {
       if (!/could not update smart object files/i.test(String(error))) throw error;
-      if (selected.kind === constants.LayerKind.NORMAL) {
-        appendLog("The layered document blocked pixel capture; isolating the selected pixel layer.");
-        const originalBounds = selected.boundsNoEffects;
-        const layerWidth = originalBounds.right - originalBounds.left;
-        const layerHeight = originalBounds.bottom - originalBounds.top;
-        if (layerWidth > 8192 || layerHeight > 8192 || layerWidth * layerHeight > 64000000)
-          throw new Error(`The selected layer is ${layerWidth} × ${layerHeight} pixels. DLSS Neural Rendering supports up to 8192 pixels per side and 64 megapixels.`);
-        if (current.width > 8192 || current.height > 8192 || current.width * current.height > 64000000)
-          throw new Error("The document canvas is too large for isolated capture. Use a smaller canvas for this layer.");
-        let scratch;
-        try {
-          scratch = await app.createDocument({
-            width: current.width, height: current.height, resolution: current.resolution,
-            mode: "RGBColorMode", fill: "transparent", depth: 8,
-            name: "DLSS temporary layer capture"
-          });
-          const copy = await selected.duplicate(scratch);
-          for (const other of [...scratch.layers])
-            if (other.id !== copy.id) await other.delete();
-          const isolated = await readPixels(scratch.id, copy.id);
-          if (isolated.width !== layerWidth || isolated.height !== layerHeight)
-            throw new Error("The selected layer changed size when isolated for capture.");
-          isolated.bounds = originalBounds;
-          return isolated;
-        } catch (fallbackError) {
-          throw new Error("Photoshop could not read the selected pixel layer, even in an isolated document. Photoshop reported: " + String(fallbackError));
-        } finally {
-          try {
-            if (scratch) await scratch.closeWithoutSaving();
-          } finally {
-            app.activeDocument = current;
-            if (current.activeLayers.length !== 1 || current.activeLayers[0].id !== layerId)
-              await action.batchPlay([{ _obj: "select", _target: [{ _ref: "layer", _id: layerId }], makeVisible: false }], {});
-          }
-        }
-      }
-      if (selected.kind !== constants.LayerKind.SMARTOBJECT)
+      const isPixel = selected.kind === constants.LayerKind.NORMAL;
+      const isSmart = selected.kind === constants.LayerKind.SMARTOBJECT;
+      if (!isPixel && !isSmart)
         throw new Error("Photoshop could not read this layer type. Select a flattened pixel layer and retry. Photoshop reported: " + String(error));
-      appendLog("Photoshop could not read the Smart Object directly; trying a temporary rasterized copy.");
-      let temporary;
+      appendLog(`Photoshop could not read the ${isSmart ? "Smart Object" : "pixel layer"} directly; isolating the selected layer.`);
+      const originalBounds = selected.boundsNoEffects;
+      const layerWidth = originalBounds.right - originalBounds.left;
+      const layerHeight = originalBounds.bottom - originalBounds.top;
+      if (layerWidth > 8192 || layerHeight > 8192 || layerWidth * layerHeight > 64000000)
+        throw new Error(`The selected layer is ${layerWidth} × ${layerHeight} pixels. DLSS Neural Rendering supports up to 8192 pixels per side and 64 megapixels.`);
+      if (current.width > 8192 || current.height > 8192 || current.width * current.height > 64000000)
+        throw new Error("The document canvas is too large for isolated capture. Use a smaller canvas for this layer.");
+      let scratch;
       try {
-        temporary = await selected.duplicate();
-        await temporary.rasterize(constants.RasterizeType.ENTIRELAYER);
-        return await readPixels(documentId, temporary.id);
+        scratch = await app.createDocument({
+          width: current.width, height: current.height, resolution: current.resolution,
+          mode: "RGBColorMode", fill: "transparent", depth: 8,
+          name: "DLSS temporary layer capture"
+        });
+        const copy = await selected.duplicate(scratch);
+        for (const other of [...scratch.layers])
+          if (other.id !== copy.id) await other.delete();
+        let isolated;
+        try {
+          isolated = await readPixels(scratch.id, copy.id);
+        } catch (copyError) {
+          if (!isSmart || !/could not update smart object files/i.test(String(copyError))) throw copyError;
+          appendLog("Isolated Smart Object still needs an update; rasterizing its temporary copy.");
+          await copy.rasterize(constants.RasterizeType.ENTIRELAYER);
+          isolated = await readPixels(scratch.id, copy.id);
+        }
+        if (isolated.width !== layerWidth || isolated.height !== layerHeight)
+          throw new Error("The selected layer changed size when isolated for capture.");
+        isolated.bounds = originalBounds;
+        return isolated;
       } catch (fallbackError) {
-        throw new Error("Photoshop could not read this Smart Object, even from a temporary rasterized copy. Relink any missing source file in the Layers panel, then retry. Photoshop reported: " + String(fallbackError));
+        throw new Error(`Photoshop could not read the selected ${isSmart ? "Smart Object" : "pixel layer"}, even in an isolated document. Check any linked Smart Object source and finish active tool edits. Photoshop reported: ` + String(fallbackError));
       } finally {
         try {
-          if (temporary) await temporary.delete();
+          if (scratch) await scratch.closeWithoutSaving();
         } finally {
-          await action.batchPlay([{ _obj: "select", _target: [{ _ref: "layer", _id: layerId }], makeVisible: false }], {});
+          app.activeDocument = current;
+          if (current.activeLayers.length !== 1 || current.activeLayers[0].id !== layerId)
+            await action.batchPlay([{ _obj: "select", _target: [{ _ref: "layer", _id: layerId }], makeVisible: false }], {});
         }
       }
     }
@@ -373,6 +378,7 @@ async function processSelectedLayer() {
   button.disabled = true;
   button.textContent = "Processing selected layer…";
   try {
+    await finishActiveToolEdit();
     const mix = clampMix(number.value);
     number.value = slider.value = String(mix);
     const { document, layer } = selectedLayer();
