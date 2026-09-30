@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>DLSSNeuralBatch</AssemblyName>
+    <Version>0.1.0</Version>
+    <Company>Reality3D</Company>
+    <Product>DLSS Neural Batch</Product>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+    <Compile Remove="dist/**/*.cs" />
+    <Compile Include="../../plugins/photoshop-dlss/bridge/RenderCache.cs" Link="RenderCache.cs" />
+    <InternalsVisibleTo Include="DLSSNeuralBatch.Tests" />
+  </ItemGroup>
+</Project>
