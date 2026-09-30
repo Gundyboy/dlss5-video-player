@@ -3,15 +3,17 @@ const { entrypoints, shell, storage } = require("uxp");
 
 // UXP's manifest allowlist rejects numeric loopback addresses in Photoshop.
 const endpoint = "http://localhost:47837";
-const panelVersion = "0.2.10";
+const panelVersion = "0.2.11";
 const fs = storage.localFileSystem;
 const slider = document.getElementById("mix");
 const number = document.getElementById("mixNumber");
 const button = document.getElementById("process");
+const panoButton = document.getElementById("pano");
 const status = document.getElementById("status");
 const log = document.getElementById("log");
 let busy = false;
 let progress = null;
+let panoEnabled = false;
 
 entrypoints.setup({ panels: { dlssNeuralMix: { show() {} } } });
 
@@ -60,30 +62,32 @@ async function pollBridgeStatus(current) {
     const next = data.busy && bridgePhases[data.phase];
     if (next && next !== current.stage && current.active) {
       current.stage = next;
-      appendLog(next);
+      appendLog(current.label ? `${current.label} · ${next}` : next);
     }
   } catch (_) {
     // Older bridge versions have no status endpoint; the elapsed timer remains.
   } finally { current.polling = false; }
 }
 
-function startProgress() {
+function startProgress(label = "") {
   const current = {
     active: true,
     polling: false,
     started: Date.now(),
     nextLog: Date.now() + 30000,
-    stage: "Waiting for renderer response"
+    stage: "Waiting for renderer response",
+    label
   };
   progress = current;
   status.dataset.state = "working";
-  appendLog("Renderer request sent");
+  appendLog(label ? `${label} · Renderer request sent` : "Renderer request sent");
   current.timer = setInterval(() => {
     if (!current.active) return;
     const elapsed = Math.floor((Date.now() - current.started) / 1000);
-    status.textContent = `${current.stage} · ${elapsedText(elapsed)} elapsed`;
+    const stage = current.label ? `${current.label} · ${current.stage}` : current.stage;
+    status.textContent = `${stage} · ${elapsedText(elapsed)} elapsed`;
     if (Date.now() >= current.nextLog) {
-      appendLog(`${current.stage} (${elapsedText(elapsed)} elapsed)`);
+      appendLog(`${stage} (${elapsedText(elapsed)} elapsed)`);
       current.nextLog = Date.now() + 30000;
     }
   }, 1000);
@@ -112,6 +116,12 @@ number.addEventListener("change", () => {
   const mix = clampMix(number.value);
   number.value = slider.value = String(mix);
 });
+panoButton.addEventListener("click", () => {
+  if (busy) return;
+  panoEnabled = !panoEnabled;
+  panoButton.textContent = panoEnabled ? "Pano: On" : "Pano: Off";
+  panoButton.setAttribute("aria-pressed", String(panoEnabled));
+});
 
 async function bridgeVersion() {
   try {
@@ -127,7 +137,7 @@ async function bridgeVersion() {
 async function ensureBridge() {
   appendLog("Checking local renderer bridge");
   const runningVersion = await bridgeVersion();
-  if (runningVersion === 2) {
+  if (runningVersion === 3) {
     appendLog("Renderer bridge connected");
     return;
   }
@@ -144,7 +154,7 @@ async function ensureBridge() {
   if (result) throw new Error("Could not start the local bridge: " + result);
   for (let attempt = 0; attempt < 40; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 250));
-    if (await bridgeVersion() === 2) {
+    if (await bridgeVersion() === 3) {
       appendLog("Renderer bridge connected");
       return;
     }
@@ -372,18 +382,92 @@ function composePixels(source, neural, components, mix, pixelCount) {
   return output;
 }
 
+async function renderPixels(rgb, width, height, label = "") {
+  startProgress(label);
+  try {
+    const response = await fetch(endpoint + "/render", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-Width": String(width),
+        "X-Height": String(height)
+      },
+      body: rgb.buffer
+    });
+    if (!response.ok) throw new Error(await response.text());
+    if (response.headers.get("X-DLSS-Cache") === "hit")
+      appendLog(label ? `${label} · Reused cached render` : "Reused cached render");
+    const neural = new Uint8Array(await response.arrayBuffer());
+    if (neural.length !== width * height * 3)
+      throw new Error("The renderer returned the wrong number of pixels.");
+    return neural;
+  } finally { stopProgress(); }
+}
+
+function offsetRgbInPlace(rgb, width, height, offset) {
+  // Wrap whole rows without resampling; use one row of scratch memory.
+  const rowBytes = width * 3;
+  const split = offset * 3;
+  const row = new Uint8Array(rowBytes);
+  for (let y = 0; y < height; y++) {
+    const start = y * rowBytes;
+    row.set(rgb.subarray(start, start + rowBytes));
+    rgb.set(row.subarray(split), start);
+    rgb.set(row.subarray(0, split), start + rowBytes - split);
+  }
+}
+
+function blendPanoramaSeam(neural, offsetNeural, width, height, offset) {
+  // Keep the middle from the original view. Near the wrap seam use only the
+  // offset view, then feather out over 1/8 of the width on each side.
+  const coreWidth = Math.max(1, Math.floor(width * 0.02));
+  const featherWidth = Math.max(coreWidth + 1, Math.round(width / 8));
+  const weights = new Float32Array(featherWidth);
+  for (let distance = 0; distance < featherWidth; distance++)
+    weights[distance] = distance <= coreWidth ? 1 :
+      (1 + Math.cos(Math.PI * (distance - coreWidth) / (featherWidth - coreWidth))) / 2;
+  for (let y = 0; y < height; y++) {
+    for (let side = 0; side < 2; side++) {
+      for (let distance = 0; distance < featherWidth; distance++) {
+        const x = side === 0 ? distance : width - 1 - distance;
+        const weight = weights[distance];
+        // Read the inverse offset directly, avoiding another full-size buffer.
+        const offsetX = (x - offset + width) % width;
+        const p = (y * width + x) * 3;
+        const q = (y * width + offsetX) * 3;
+        for (let c = 0; c < 3; c++)
+          neural[p + c] = Math.round(neural[p + c] * (1 - weight) + offsetNeural[q + c] * weight);
+      }
+    }
+  }
+  return neural;
+}
+
+async function renderPanorama(rgb, width, height) {
+  const neural = await renderPixels(rgb, width, height, "Pano 1/2 · original view");
+  const offset = Math.floor(width / 2);
+  setStatus("Preparing half-width panorama offset…");
+  offsetRgbInPlace(rgb, width, height, offset);
+  const offsetNeural = await renderPixels(rgb, width, height, "Pano 2/2 · seam view");
+  setStatus("Restoring panorama offset and blending the seam…");
+  return blendPanoramaSeam(neural, offsetNeural, width, height, offset);
+}
+
 async function processSelectedLayer() {
   if (busy) return;
   busy = true;
   button.disabled = true;
+  panoButton.disabled = true;
   button.textContent = "Processing selected layer…";
   try {
     await finishActiveToolEdit();
     const mix = clampMix(number.value);
+    const usePano = panoEnabled;
     number.value = slider.value = String(mix);
     const { document, layer } = selectedLayer();
     const name = `DLSS - ${mix}% Mix`;
     appendLog(`Selected layer: ${layer.name} (${layer.kind})`);
+    if (usePano) appendLog("Pano enabled: protect the horizontal wrap seam with two views.");
     if (mix === 0) {
       setStatus("Creating Smart Object…");
       await duplicateAtZero(document.id, layer.id, name);
@@ -403,24 +487,7 @@ async function processSelectedLayer() {
 
     setStatus(`Preparing ${width} × ${height} render…`);
     await ensureBridge();
-    startProgress();
-    const response = await fetch(endpoint + "/render", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "X-Width": String(width),
-        "X-Height": String(height)
-      },
-      body: rgb.buffer
-    });
-    if (!response.ok) {
-      stopProgress();
-      throw new Error(await response.text());
-    }
-    const neural = new Uint8Array(await response.arrayBuffer());
-    stopProgress();
-    if (neural.length !== pixelCount * 3)
-      throw new Error("The renderer returned the wrong number of pixels.");
+    const neural = usePano ? await renderPanorama(rgb, width, height) : await renderPixels(rgb, width, height);
     setStatus("Mixing rendered and original pixels…");
     const output = composePixels(source, neural, components, mix, pixelCount);
     setStatus("Adding Smart Object…");
@@ -433,6 +500,7 @@ async function processSelectedLayer() {
     stopProgress();
     busy = false;
     button.disabled = false;
+    panoButton.disabled = false;
     button.textContent = "Apply to selected layer";
   }
 }

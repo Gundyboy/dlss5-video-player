@@ -4,8 +4,8 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const controls = new Map();
-for (const id of ["mix", "mixNumber", "process", "status", "log"])
-  controls.set(id, { value: "50", dataset: {}, addEventListener(event, callback) { this[event] = callback; } });
+for (const id of ["mix", "mixNumber", "process", "pano", "status", "log"])
+  controls.set(id, { value: "50", dataset: {}, setAttribute(key, value) { this[key] = value; }, addEventListener(event, callback) { this[event] = callback; } });
 const log = controls.get("log");
 log.childNodes = [];
 log.scrollTop = 0;
@@ -31,11 +31,19 @@ let layeredReadFails = false;
 let isolatedReadFails = false;
 let scratchClosed = 0;
 let starterDeleted = 0;
+let insertions = 0;
+let renderFrame = () => new Uint8Array(64 * 64 * 3).fill(200);
+let failOnRender = 0;
 const original = {
   id: 1, name: "Flattened artwork", kind: "pixel", opacity: 100, blendMode: "normal",
   boundsNoEffects: { left: 4, top: 6, right: 68, bottom: 70 },
   async duplicate(target) {
     assert.equal(modalDepth, 1);
+    if (!target) {
+      const copy = { id: 10 };
+      document.activeLayers = [copy];
+      return copy;
+    }
     assert.equal(target.id, 8, "the pixel layer must be copied into the isolated document");
     const copy = { id: 6, kind: "pixel" };
     target.layers.unshift(copy);
@@ -68,6 +76,7 @@ const document = {
   activeLayers: [original],
   async createPixelLayer({ name }) {
     assert.equal(modalDepth, 1);
+    insertions++;
     return { id: 2, name, move() {} };
   }
 };
@@ -167,12 +176,13 @@ const context = {
   async fetch(url) {
     assert.ok(url.startsWith("http://localhost:47837/"), "UXP needs the allowlisted localhost hostname");
     if (url.endsWith("/health"))
-      return { ok: true, headers: { get() { return "2"; } } };
+      return { ok: true, headers: { get() { return "3"; } } };
     if (url.endsWith("/render")) {
       assert.equal(modalDepth, 0, "neural rendering must not hold Photoshop modal");
       assert.equal(capturedDisposed, true, "capture must be released before rendering");
       renders++;
-      return { ok: true, async arrayBuffer() { return new Uint8Array(64 * 64 * 3).fill(200).buffer; } };
+      if (renders === failOnRender) return { ok: false, async text() { return "Second panorama render failed"; } };
+      return { ok: true, headers: { get() { return "miss"; } }, async arrayBuffer() { return renderFrame().buffer; } };
     }
     throw new Error(`Unexpected request: ${url}`);
   },
@@ -239,6 +249,34 @@ controls.get("process").click().then(async () => {
   await controls.get("process").click();
   assert.equal(toolCommits, 1, "an active Photoshop tool edit must be committed before capture");
   assert.equal(renders, 5);
+  controls.get("pano").click();
+  assert.equal(controls.get("pano")["aria-pressed"], "true");
+  let panoPass = 0;
+  renderFrame = () => new Uint8Array(64 * 64 * 3).fill(++panoPass === 1 ? 200 : 60);
+  document.activeLayers = [original];
+  await controls.get("process").click();
+  assert.equal(renders, 7, "Pano must render both original and offset views");
+  assert.equal(insertedPixels[0], 80, "the seam view must be blended before applying Mix");
+  assert.equal(insertedPixels[32 * 4], 150, "Pano must retain the original render in the middle");
+  assert.equal(insertedPixels[3], 255, "Pano must retain source alpha");
+  assert.equal(document.activeLayers[0].name, "DLSS - 50% Mix");
+  assert.equal(controls.get("pano").disabled, false);
+  const beforeZero = renders;
+  controls.get("mixNumber").value = "0";
+  document.activeLayers = [original];
+  await controls.get("process").click();
+  assert.equal(renders, beforeZero, "0% Pano must skip both renders");
+  assert.equal(document.activeLayers[0].name, "DLSS - 0% Mix");
+  controls.get("mixNumber").value = "50";
+  failOnRender = renders + 2;
+  const beforeFailure = insertions;
+  document.activeLayers = [original];
+  await controls.get("process").click();
+  assert.equal(insertions, beforeFailure, "a failed second pass must not insert a partial result");
+  assert.equal(document.activeLayers[0].id, original.id);
+  assert.equal(controls.get("status").dataset.state, "error");
+  assert.match(controls.get("status").textContent, /Second panorama render failed/);
+  assert.equal(controls.get("pano").disabled, false);
   assert.equal(context.clampMix(250), 200, "Mix must clamp to the renderer's 200% maximum");
   const enhanced = context.composePixels(
     new Uint8Array([100, 100, 100, 77]), new Uint8Array([150, 150, 150]), 4, 200, 1);
@@ -253,5 +291,5 @@ controls.get("process").click().then(async () => {
   await assert.rejects(context.ensureBridge(), /Photoshop blocked the local renderer connection/);
   context.fetch = async () => { throw new Error("Connection refused"); };
   assert.equal(await context.bridgeVersion(), 0, "An offline bridge should trigger startup");
-  console.log("Modal capture, non-modal render, Smart Object insertion, and bridge permission handling passed.");
+  console.log("Modal capture, Pano/Mix rendering, failure cleanup, Smart Object insertion, and bridge permissions passed.");
 }).catch(error => { console.error(error); process.exitCode = 1; });

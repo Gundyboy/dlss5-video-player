@@ -2,4 +2,6 @@
 /dist/
 /bridge/bin/
 /bridge/obj/
+/tests/bridge-cache/bin/
+/tests/bridge-cache/obj/
 /.dotnet/

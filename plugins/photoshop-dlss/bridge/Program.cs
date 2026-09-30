@@ -15,8 +15,8 @@ internal static class Program
     private static readonly string WorkRoot = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "DLSSPhotoshopBridge");
-    private static string? lastKey;
-    private static string? lastRgb;
+    private static readonly RenderCache Frames = new(WorkRoot);
+    private static readonly SemaphoreSlim RenderGate = new(1, 1);
     private static int rendering;
     private static string phase = "idle";
 
@@ -49,7 +49,8 @@ internal static class Program
         response.Headers["Access-Control-Allow-Origin"] = "*";
         response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
         response.Headers["Access-Control-Allow-Headers"] = "Content-Type, X-Width, X-Height";
-        response.Headers["X-DLSS-Bridge"] = "2";
+        response.Headers["Access-Control-Expose-Headers"] = "X-DLSS-Bridge, X-DLSS-Cache";
+        response.Headers["X-DLSS-Bridge"] = "3";
         try
         {
             var path = context.Request.Url?.AbsolutePath;
@@ -75,14 +76,18 @@ internal static class Program
             }
             else if (context.Request.HttpMethod == "POST" && path == "/render")
             {
-                if (Interlocked.CompareExchange(ref rendering, 1, 0) != 0)
+                // A client can receive the final RGB byte before this request
+                // finishes cleanup. Allow that short handoff to finish instead
+                // of rejecting the next panorama view or cached Mix request.
+                if (!await RenderGate.WaitAsync(TimeSpan.FromSeconds(2)))
                     await WriteText(response, 409, "The renderer is already processing another image.");
                 else
                 {
+                    Volatile.Write(ref rendering, 1);
                     SetPhase("receiving");
                     try { await Render(context); }
                     catch { SetPhase("failed"); throw; }
-                    finally { Volatile.Write(ref rendering, 0); }
+                    finally { Volatile.Write(ref rendering, 0); RenderGate.Release(); }
                 }
             }
             else await WriteText(response, 404, "Unknown bridge endpoint.");
@@ -137,14 +142,16 @@ internal static class Program
             var digest = await WriteBmp(request.InputStream, input, width, height);
             SetPhase("checkingCache");
             var settingsPath = Path.Combine(runnerDirectory, "neural-runtime", "ReShade.ini");
-            string CacheKey() => digest + ":" + width + "x" + height + ":" +
+            string CacheKey() => digest + ":" + width + "x" + height + ":" + runner + ":" +
                 File.GetLastWriteTimeUtc(runner).Ticks + ":" +
                 File.GetLastWriteTimeUtc(worker).Ticks + ":" +
-                File.GetLastWriteTimeUtc(settingsPath).Ticks;
-            if (CacheKey() == lastKey && lastRgb != null && File.Exists(lastRgb))
+                RenderCache.SettingsFingerprint(settingsPath);
+            var cached = Frames.TryGet(CacheKey(), inputBytes);
+            if (cached != null)
             {
+                response.Headers["X-DLSS-Cache"] = "hit";
                 SetPhase("sending");
-                await SendRgb(response, lastRgb, inputBytes);
+                await SendRgb(response, cached, inputBytes);
                 SetPhase("complete");
                 return;
             }
@@ -161,13 +168,10 @@ internal static class Program
                 runnerDirectory);
             if (new FileInfo(raw).Length != inputBytes)
                 throw new IOException("The decoded neural image has the wrong dimensions.");
-            var cache = Path.Combine(WorkRoot, "last.rgb");
-            if (File.Exists(cache)) File.Delete(cache);
-            File.Move(raw, cache);
-            lastRgb = cache;
-            // The worker may update ReShade.ini during startup. Cache the
-            // resulting timestamp so an identical Mix change reuses this frame.
-            lastKey = CacheKey();
+            // The runner can rewrite ReShade.ini without changing its contents.
+            // Fingerprint the resulting settings to retain both panorama views.
+            var cache = Frames.Store(CacheKey(), raw, inputBytes);
+            response.Headers["X-DLSS-Cache"] = "miss";
             SetPhase("sending");
             await SendRgb(response, cache, inputBytes);
             SetPhase("complete");

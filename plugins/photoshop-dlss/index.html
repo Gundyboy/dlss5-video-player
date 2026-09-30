@@ -47,6 +47,11 @@
       cursor: pointer; white-space: normal;
     }
     #process:disabled { opacity: .55; cursor: default; }
+    .pano-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 17px 0 6px; }
+    .pano-row h2 { margin: 0; font-size: 13px; }
+    #pano { flex: 0 0 auto; min-height: 30px; padding: 5px 10px; border: 1px solid rgba(128, 128, 128, .7); border-radius: 6px; background: rgba(128, 128, 128, .1); color: inherit; font: 600 12px sans-serif; cursor: pointer; }
+    #pano[aria-pressed="true"] { background: #6657cf; border-color: #8e83e4; color: #fff; }
+    #pano:disabled { opacity: .55; cursor: default; }
     .result-hint { margin: 8px 0 0; text-align: center; opacity: .7; font-size: 11px; }
     .activity-title { margin: 18px 0 7px; font-size: 12px; font-weight: 700; }
     #status {
@@ -79,7 +84,7 @@
     <header class="brand">
       <div class="mark" aria-hidden="true">N</div>
       <div class="brand-text">
-        <p class="eyebrow">Photoshop neural filter · v0.2.10</p>
+        <p class="eyebrow">Photoshop neural filter · v0.2.11</p>
         <h1>DLSS Neural Mix</h1>
       </div>
     </header>
@@ -103,6 +108,11 @@
       </div>
       <input id="mix" type="range" min="0" max="200" value="100" aria-label="Neural mix percentage">
       <div class="range-labels"><span>0% · Original</span><span>100% · Neural</span><span>200% · Enhanced</span></div>
+      <div class="pano-row">
+        <h2>360° panorama</h2>
+        <button id="pano" type="button" aria-pressed="false" aria-label="Protect the panorama wrap seam" aria-describedby="panoHint">Pano: Off</button>
+      </div>
+      <p id="panoHint" class="hint">Protects the left/right seam using two renders.</p>
       <button id="process" type="button">Apply to selected layer</button>
       <p class="result-hint">Creates a new Smart Object and keeps the original</p>
     </section>

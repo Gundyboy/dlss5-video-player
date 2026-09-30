@@ -9,11 +9,28 @@ Mix runs from 0–200%. From 100–200%, it matches the player's guarded luminan
 ratio extension, preserving the neural frame's hue rather than extrapolating
 RGB channel values past their valid range.
 
-The panel has one strength control, an Apply button, progress, and a bounded
+The panel has a strength control, a Pano toggle, an Apply button, progress, and a bounded
 activity log. Its preferred height is 700 pixels when docked and 760 when
 floating. Photoshop allows resizing within the manifest bounds where its
 workspace permits; the content scrolls in smaller panels and the log grows in
 taller ones.
+
+## Panorama mode
+
+Enable **Pano: On** for a layer covering the full horizontal 360° view. The panel
+renders the original view, wraps the input horizontally by half its width, and
+renders again with the original left/right seam in the middle of the image.
+It restores the offset when combining the frames. The shifted view supplies
+the outer 2% on each side, with a cosine feather out to 12.5%; the middle 75%
+keeps the original render. Mix is then applied once and source alpha is retained.
+The new Smart Object keeps the same `DLSS - 50% Mix` naming convention.
+
+The initial Pano operation uses two renders. Both frames are cached so Mix
+changes on an unchanged layer can reuse them. Offsets use whole pixels and one
+scratch row, with no resampling or extra image width; odd widths use the nearest
+whole-pixel half-width offset and its exact inverse. Pano protects the horizontal
+wrap seam; it does not repair a seam already present in the source or correct
+distortion at the top and bottom poles. At 0% it skips both renders.
 
 ## Neural-only path
 
@@ -28,8 +45,10 @@ The bridge listens on `127.0.0.1:47837`; the panel connects using `localhost`
 because Photoshop rejects numeric IP addresses in its UXP permission allowlist.
 Image pixels stay on the local machine.
 Its work files and log live under `%LOCALAPPDATA%\DLSSPhotoshopBridge`; each
-finished job's work files are removed. It remembers the last neural RGB frame,
-so changing Mix on the same unchanged layer does not invoke the model again.
+finished job's work files are removed. It remembers the two most recent neural
+RGB frames on disk, so changing Mix on the same unchanged regular layer or
+panorama does not invoke the model again. Cache keys include pixels, dimensions,
+runner/worker versions, and the rendering settings contents.
 
 The panel reads RGB pixels at 8 bits per component. A layer must be at least
 64 × 64, no more than 8192 pixels on either side, and at most 64 megapixels.
@@ -64,8 +83,10 @@ to install .NET separately. The bridge log is
 `%LOCALAPPDATA%\DLSSPhotoshopBridge\bridge.log`; the worker's own log stays
 beside `NeuralWorker.exe`.
 
-Run `node tests/modal-flow.test.js` and `powershell -File tests/upgrade.test.ps1`
-from this plugin folder for the modal and installer regressions. For a live
+Run `node tests/modal-flow.test.js`, `node tests/panorama.test.js`,
+`dotnet run --project tests/bridge-cache/BridgeCache.Tests.csproj`, and
+`powershell -File tests/upgrade.test.ps1` from this plugin folder for the panel,
+panorama, cache, and installer regressions. For a live
 integration check, copy the panel into an isolated development plugin with a
 different plugin ID, include `tests/photoshop-live.js` after `panel.js`, and load
 it through Adobe UXP Developer Tool. It tests 50%, 100%, 200%, and 0% in a temporary
@@ -73,6 +94,11 @@ it through Adobe UXP Developer Tool. It tests 50%, 100%, 200%, and 0% in a tempo
 document. Inspect `globalThis.__dlssDiagnostic` in the development console for
 the result. This check uses the real local GPU renderer and may prompt to open
 the bridge on first use. Never include this test script in a release package.
+
+After `Build-Installer.ps1`, run `node tests/bridge-pano-smoke.js` with the local
+renderer installed and no existing bridge running. It starts the rebuilt bridge
+in the background, renders two 512 × 256 panorama views through the real GPU,
+checks that repeating the operation reuses both frames, and closes its own bridge.
 
 ## Windows installer
 
