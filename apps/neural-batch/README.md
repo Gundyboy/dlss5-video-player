@@ -59,6 +59,12 @@ The self-contained EXE, portable ZIP and setup EXE are created under `dist`.
 The portable ZIP also includes `RuntimeFiles`; choose the player executable from
 the application on first launch to configure the renderer.
 
+To add the batch installer to an existing player and Photoshop bundle, run
+`installer/Build-CombinedBundle.ps1 -SourceBundle <existing bundle.zip>`.
+It produces `dist/DLSS Video Player - PS Plugin.zip`, adds the batch installer
+and setup instructions, and verifies that every original payload file is
+unchanged and the added installer matches its SHA256.
+
 Run `dotnet run --project tests/DLSSNeuralBatch.Tests.csproj -- dist` from this
 folder for pixel math, orientation/alpha, output collision/cleanup, queue behavior,
 atomic runtime installation, owned process cancellation and offscreen UI layout

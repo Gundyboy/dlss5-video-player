@@ -53,3 +53,22 @@ source seams, pole distortion, and available VRAM depend on the user's inputs
 and hardware. The app uses the existing runner's verified frame lifecycle,
 including GPU helper initialization for an uncached frame. It writes flattened
 8-bit sRGB PNGs and does not preserve full source metadata or HDR/TIFF bit depth.
+
+## Combined bundle and portal publication
+
+Published on 30 September 2026 to the existing NAS ZIP and Servermanagerwh's
+`downloads/dlss-video-player-ps-plugin/latest` location. The bundle contains the
+player, Photoshop plugin installer 0.2.11, batch installer 0.1.0, and setup notes.
+All 25 original payload files were preserved byte for byte. The added batch
+installer matched its tested SHA256, and all 12 bundled neural runtime files
+matched the installers' runtime lock.
+
+The existing portal quick link was renamed to
+`DLSS Video Player + Photoshop + Batch`. The filename and download route were
+retained. Both the live page and download API passed. The complete ZIP streamed
+through HTTP with status 200 and matched the local package's checksum:
+
+- Size: 405,004,537 bytes.
+- SHA256: `8C8A6E485D8C96101DDDC53E2F2F3D6B06343DC4A3B02B017BB581E26C17E07D`.
+- Live portal: `http://servermanagerwh:4961/`.
+- Rollback ZIP and page retained under `dist/before-batch-publication`.
