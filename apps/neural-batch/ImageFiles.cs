@@ -71,7 +71,7 @@ internal static class ImageFiles
             cancellation.ThrowIfCancellationRequested();
             var stem = Path.GetFileNameWithoutExtension(input);
             if (stem.Length > 160) stem = stem[..160];
-            var suffix = $" - DLSS {options.Mix}%" + (options.Pano ? " - Pano" : "");
+            var suffix = $" - DLSS {options.Mix}%" + (options.Scale == 2 ? " - 2x" : "") + (options.Pano ? " - Pano" : "");
             for (var index = 0; index < 10000; index++)
             {
                 var destination = Path.Combine(folder, stem + suffix + (index == 0 ? "" : $" ({index + 1})") + ".png");

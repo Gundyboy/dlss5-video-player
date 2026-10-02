@@ -48,10 +48,11 @@ internal sealed class Renderer
     public Renderer(string runner, string root)
     {
         this.runner = Path.GetFullPath(runner);
-        Directory.CreateDirectory(root); cache = new(root);
+        Directory.CreateDirectory(root); cache = new(root, 4);
     }
 
-    internal async Task<byte[]> RenderAsync(byte[] rgb, int width, int height, string job, CancellationToken cancellation)
+    internal async Task<byte[]> RenderAsync(byte[] rgb, int width, int height, int outputWidth, int outputHeight,
+        bool neural, string job, CancellationToken cancellation)
     {
         var directory = Path.GetDirectoryName(runner)!;
         var worker = Path.Combine(directory, "neural-runtime", "NeuralWorker.exe");
@@ -60,19 +61,23 @@ internal sealed class Renderer
             throw new FileNotFoundException("The renderer is unavailable. Choose the video player executable again.");
         var settings = Path.Combine(directory, "neural-runtime", "ReShade.ini");
         var digest = Convert.ToHexString(SHA256.HashData(rgb));
-        string Key() => digest + ":" + width + "x" + height + ":" + runner + ":" + File.GetLastWriteTimeUtc(runner).Ticks + ":" +
+        var outputBytes = checked((long)outputWidth * outputHeight * 3);
+        string Key() => "batch-v2:" + digest + ":" + width + "x" + height + ":" + outputWidth + "x" + outputHeight + ":neural=" + neural + ":" + runner + ":" + File.GetLastWriteTimeUtc(runner).Ticks + ":" +
             File.GetLastWriteTimeUtc(worker).Ticks + ":" + RenderCache.SettingsFingerprint(settings);
-        var cached = cache.TryGet(Key(), rgb.LongLength);
+        var cached = cache.TryGet(Key(), outputBytes);
         if (cached != null) return await File.ReadAllBytesAsync(cached, cancellation);
         var input = Path.Combine(job, "input.bmp");
         var video = Path.Combine(job, "output.mkv");
         var raw = Path.Combine(job, "output.rgb");
         if (File.Exists(video)) File.Delete(video);
         await WriteBmpAsync(input, rgb, width, height, cancellation);
-        await HiddenProcess.RunAsync(runner, new[] { "--input", input, "--output", video, "--width", width.ToString(), "--height", height.ToString() }, cancellation);
+        var arguments = new List<string> { "--input", input, "--output", video, "--width", width.ToString(), "--height", height.ToString() };
+        if (outputWidth != width || outputHeight != height)
+            arguments.AddRange(new[] { "--output-width", outputWidth.ToString(), "--output-height", outputHeight.ToString(), "--neural", neural ? "on" : "off" });
+        await HiddenProcess.RunAsync(runner, arguments, cancellation);
         if (!File.Exists(video)) throw new IOException("The renderer did not return a verified image.");
         await HiddenProcess.RunAsync(ffmpeg, new[] { "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i", video, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", raw }, cancellation);
-        var stored = cache.Store(Key(), raw, rgb.LongLength);
+        var stored = cache.Store(Key(), raw, outputBytes);
         return await File.ReadAllBytesAsync(stored, cancellation);
     }
 
@@ -106,8 +111,10 @@ internal sealed class ImageProcessor(string runner, string workRoot)
         cancellation.ThrowIfCancellationRequested();
         progress?.Report(new("Reading image", 5));
         var source = await Task.Run(() => ImageFiles.Read(input), cancellation);
-        progress?.Report(new("Image ready", 10, $"{source.Width} × {source.Height}"));
-        if (options.Mix == 0)
+        var (outputWidth, outputHeight) = PixelMath.OutputSize(source.Width, source.Height, options.Scale);
+        progress?.Report(new("Image ready", 10, options.Scale == 1 ? $"{source.Width} × {source.Height}" :
+            $"{source.Width} × {source.Height} → {outputWidth} × {outputHeight}"));
+        if (options.Mix == 0 && options.Scale == 1)
         {
             progress?.Report(new("Saving original pixels", 90));
             return await Task.Run(() => ImageFiles.SaveResult(input, options.OutputFolder, source, options, cancellation), cancellation);
@@ -117,22 +124,36 @@ internal sealed class ImageProcessor(string runner, string workRoot)
         try
         {
             var rgb = await Task.Run(() => PixelMath.ToRgb(source), cancellation);
-            progress?.Report(new(options.Pano ? "Pano 1/2 — original view" : "Neural rendering", 20));
-            var neural = await renderer.RenderAsync(rgb, source.Width, source.Height, job, cancellation);
-            if (options.Pano)
+            async Task<byte[]> RenderView(bool neuralPass)
             {
-                var offset = source.Width / 2;
-                await Task.Run(() => PixelMath.Offset(rgb, source.Width, source.Height, offset), cancellation);
-                progress?.Report(new("Pano 2/2 — seam view", 55));
-                var shifted = await renderer.RenderAsync(rgb, source.Width, source.Height, job, cancellation);
-                progress?.Report(new("Blending panorama seam", 80));
-                await Task.Run(() => PixelMath.BlendSeam(neural, shifted, source.Width, source.Height, offset), cancellation);
+                var mode = neuralPass ? (options.Scale == 2 ? "DLSS 2× + neural" : "Neural rendering") : "DLSS 2× upscaling";
+                progress?.Report(new(mode + (options.Pano ? " · Pano 1/2 — original view" : ""), 20));
+                var frame = await renderer.RenderAsync(rgb, source.Width, source.Height, outputWidth, outputHeight, neuralPass, job, cancellation);
+                if (options.Pano)
+                {
+                    var offset = source.Width / 2;
+                    await Task.Run(() => PixelMath.Offset(rgb, source.Width, source.Height, offset), cancellation);
+                    progress?.Report(new(mode + " · Pano 2/2 — seam view", 55));
+                    var shifted = await renderer.RenderAsync(rgb, source.Width, source.Height, outputWidth, outputHeight, neuralPass, job, cancellation);
+                    progress?.Report(new("Blending panorama seam", 80));
+                    // Integer 2× scaling keeps the inverse shift exact for odd widths too.
+                    await Task.Run(() => PixelMath.BlendSeam(frame, shifted, outputWidth, outputHeight, offset * options.Scale), cancellation);
+                    await Task.Run(() => PixelMath.Offset(rgb, source.Width, source.Height, source.Width - offset), cancellation);
+                }
+                return frame;
             }
+            var reference = options.Scale == 2 ? await Task.Run(() => PixelMath.UpscaledAlpha(source, options.Pano), cancellation) : source;
+            if (options.Scale == 2 && options.Mix is not (0 or 100))
+            {
+                var baseline = await RenderView(false);
+                await Task.Run(() => PixelMath.SetRgb(reference, baseline), cancellation);
+            }
+            var neural = await RenderView(options.Mix > 0);
             progress?.Report(new("Applying Mix", 85));
-            var output = await Task.Run(() => PixelMath.Compose(source, neural, options.Mix), cancellation);
+            var output = await Task.Run(() => PixelMath.Compose(reference, neural, options.Mix == 0 ? 100 : options.Mix), cancellation);
             cancellation.ThrowIfCancellationRequested();
             progress?.Report(new("Saving PNG", 95));
-            return await Task.Run(() => ImageFiles.SaveResult(input, options.OutputFolder, source with { Bgra = output }, options, cancellation), cancellation);
+            return await Task.Run(() => ImageFiles.SaveResult(input, options.OutputFolder, reference with { Bgra = output }, options, cancellation), cancellation);
         }
         finally
         {

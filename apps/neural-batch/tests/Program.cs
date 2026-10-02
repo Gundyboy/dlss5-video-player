@@ -24,7 +24,7 @@ internal static class Tests
         Directory.CreateDirectory(fixture);
         try
         {
-            PixelTests(); FileTests(); RenderUi(dist);
+            PixelTests(); FileTests(); CacheTests(); RenderUi(dist);
             RunAsync(args.Contains("--gpu"), args.Contains("--packaged-runtime") ? Path.Combine(dist, "portable", "RuntimeFiles") : null).GetAwaiter().GetResult();
             Console.WriteLine("Batch tests passed: pixel math, image IO/orientation/alpha, collision safety, queue pause/stop/errors, runtime install, hidden-process cancellation, and compact UI layout.");
             return 0;
@@ -64,6 +64,15 @@ internal static class Tests
         CheckThrows(() => PixelMath.ValidateDimensions(8193, 256));
         CheckThrows(() => PixelMath.ValidateDimensions(8192, 8192));
         PixelMath.ValidateDimensions(8192, 4096);
+        Check(PixelMath.OutputSize(129, 65, 2) == (258, 130), "Odd source upscale must preserve exact doubled dimensions.");
+        CheckThrows(() => PixelMath.OutputSize(8192, 4096, 2));
+        CheckThrows(() => PixelMath.OutputSize(128, 64, 3));
+        var alpha = new ImagePixels(64, 64, new byte[64 * 64 * 4]);
+        for (var y = 0; y < 64; y++) { alpha.Bgra[(y * 64) * 4 + 3] = 0; alpha.Bgra[(y * 64 + 1) * 4 + 3] = 255; alpha.Bgra[(y * 64 + 63) * 4 + 3] = 200; }
+        var resized = PixelMath.UpscaledAlpha(alpha, false);
+        Check(resized.Bgra[3] == 0 && resized.Bgra[7] == 64 && resized.Bgra[11] == 191 && resized.Bgra[15] == 191, "Alpha interpolation or pixel-center alignment changed.");
+        var wrapped = PixelMath.UpscaledAlpha(alpha, true);
+        Check(wrapped.Bgra[3] == 50 && wrapped.Bgra[(127 * 4) + 3] == 150, "Pano alpha must wrap at the horizontal seam.");
     }
     private static void CheckThrows(Action action) { try { action(); } catch { return; } throw new Exception("Expected validation failure."); }
 
@@ -100,9 +109,10 @@ internal static class Tests
     private static void RenderUi(string dist)
     {
         var application = new App(); application.InitializeComponent();
-        foreach (var size in new[] { (1120, 840, "ui-default.png"), (820, 760, "ui-compact.png") })
+        foreach (var size in new[] { (1120, 880, "ui-default.png"), (820, 760, "ui-compact.png") })
         {
             var window = new MainWindow();
+            window.SelectedUpscale = window.UpscaleChoices[1];
             window.Jobs.Add(new ImageJob(Path.Combine(fixture, "Tower Hero.jpg")) { Size = "4096 × 2048", Status = "Done", State = JobState.Done });
             window.Jobs.Add(new ImageJob(Path.Combine(fixture, "360 Panorama.png")) { Size = "8192 × 4096", Status = "Waiting" });
             var root = (Grid)window.Content;
@@ -112,10 +122,23 @@ internal static class Tests
             var footer = root.Children.OfType<DockPanel>().Single(child => Grid.GetRow(child) == 7);
             var footerBounds = footer.TransformToAncestor(root).TransformBounds(new Rect(0, 0, footer.ActualWidth, footer.ActualHeight));
             Check(footerBounds.Bottom <= root.ActualHeight + 1, "Compact window clips its footer.");
+            var upscaler = (ComboBox)window.FindName("UpscalerControl");
+            Check(upscaler.SelectedItem is UpscaleChoice { Scale: 2 } && upscaler.ActualWidth > 200, "Upscaler binding or layout failed.");
             var target = new RenderTargetBitmap(size.Item1, size.Item2, 96, 96, PixelFormats.Pbgra32); target.Render(root);
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(target));
             using var stream = File.Create(Path.Combine(dist, size.Item3)); encoder.Save(stream);
         }
+    }
+
+    private static void CacheTests()
+    {
+        var root = Path.Combine(fixture, "cache-check"); Directory.CreateDirectory(root);
+        var cache = new RenderCache(root, 4);
+        for (var view = 0; view < 4; view++) { var path = Path.Combine(root, "incoming.rgb"); File.WriteAllBytes(path, new byte[] { (byte)view, 1, 2 }); cache.Store("view" + view, path, 3); }
+        var saved = cache.TryGet("view0", 3); Check(saved != null && File.ReadAllBytes(saved)[0] == 0, "Mixed Pano must retain all four GPU views.");
+        var extra = Path.Combine(root, "incoming.rgb"); File.WriteAllBytes(extra, new byte[] { 4, 1, 2 }); cache.Store("view4", extra, 3);
+        Check(cache.TryGet("view1", 3) == null && cache.TryGet("view0", 3) != null, "Cache must evict the least recently used frame.");
+        Check(cache.TryGet("view4", 4) == null && Directory.GetFiles(root).Length == 4, "Cache must reject incorrect dimensions and stay bounded.");
     }
 
     private static async Task RunAsync(bool gpu, string? payload)
@@ -196,5 +219,34 @@ internal static class Tests
         }
         Check(!Directory.EnumerateDirectories(Path.Combine(fixture, "gpu-work"), "job-*").Any(), "Completed GPU jobs must leave no work folders.");
         Console.WriteLine("Real GPU batch passed: two Pano images, one bad image skipped, correct output dimensions and alpha.");
+        if (payload == null) return; // The older installed PS runner has no upscaler CLI.
+        var odd = Path.Combine(fixture, "odd-pano.png");
+        var oddPixels = Pattern(129, 65);
+        for (var index = 3; index < oddPixels.Length; index += 4) oddPixels[index] = (byte)((index / 4) % 256);
+        ImageFiles.WritePng(odd, new(129, 65, oddPixels));
+        var upscaledOptions = new BatchOptions(0, true, options.OutputFolder, 2);
+        Console.WriteLine("GPU upscale: 0% Mix, odd-width Pano, variable alpha.");
+        var sr = ImageFiles.Read(await processor.ProcessAsync(odd, upscaledOptions, null, CancellationToken.None));
+        Check(sr.Width == 258 && sr.Height == 130, "2x SR-only did not produce the requested dimensions.");
+        var expectedAlpha = PixelMath.UpscaledAlpha(new(129, 65, oddPixels), true);
+        for (var index = 3; index < sr.Bgra.Length; index += 4) Check(sr.Bgra[index] == expectedAlpha.Bgra[index], "Upscaler changed alpha or wrap interpolation.");
+        Console.WriteLine("GPU upscale: 100% Mix, SR plus neural Pano.");
+        var nr = ImageFiles.Read(await processor.ProcessAsync(odd, upscaledOptions with { Mix = 100 }, null, CancellationToken.None));
+        Check(nr.Width == 258 && nr.Height == 130, "2x SR plus neural changed dimensions.");
+        string CacheSnapshot() => string.Join(";", Directory.GetFiles(Path.Combine(fixture, "gpu-work", "cache")).Order().Select(path => Path.GetFileName(path) + File.GetLastWriteTimeUtc(path).Ticks + Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))));
+        var cacheBefore = CacheSnapshot();
+        Console.WriteLine("GPU upscale: 50% and 200% Mix must reuse cached SR/NR panorama views.");
+        var half = ImageFiles.Read(await processor.ProcessAsync(odd, upscaledOptions with { Mix = 50 }, null, CancellationToken.None));
+        for (var index = 0; index < half.Bgra.Length; index++)
+            Check(half.Bgra[index] == (index % 4 == 3 ? sr.Bgra[index] : (sr.Bgra[index] + nr.Bgra[index] + 1) / 2), "Partial Mix used a different reference from DLSS SR-only.");
+        var enhanced = ImageFiles.Read(await processor.ProcessAsync(odd, upscaledOptions with { Mix = 200 }, null, CancellationToken.None));
+        Check(enhanced.Bgra.SequenceEqual(PixelMath.Compose(sr, PixelMath.ToRgb(nr), 200)), "200% upscale Mix did not use the SR-only reference.");
+        Check(CacheSnapshot() == cacheBefore, "Mix changes must reuse all four cached views without rerendering.");
+        var tooWide = Path.Combine(fixture, "too-wide.png"); ImageFiles.WritePng(tooWide, new(4097, 64, Pattern(4097, 64)));
+        var remaining = new List<ImageJob> { new(tooWide), new(odd) };
+        await new QueueRunner().RunAsync(remaining, (job, token) => processor.ProcessAsync(job.InputPath, upscaledOptions, null, token), (_, error) => Console.WriteLine("Expected oversized output: " + error.Message), CancellationToken.None);
+        Check(remaining[0].State == JobState.Failed && remaining[1].State == JobState.Done, "Oversized upscale output must fail only that image and continue.");
+        Check(!Directory.EnumerateDirectories(Path.Combine(fixture, "gpu-work"), "job-*").Any(), "Upscale jobs left temporary folders.");
+        Console.WriteLine("Real 2x DLSS upscaler passed: SR-only, combined neural, 50/200% Mix, odd Pano, alpha, cache reuse and queue limits.");
     }
 }

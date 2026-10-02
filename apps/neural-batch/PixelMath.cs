@@ -25,6 +25,47 @@ internal static class PixelMath
         return rgb;
     }
 
+    public static (int Width, int Height) OutputSize(int width, int height, int scale)
+    {
+        if (scale is not (1 or 2)) throw new InvalidDataException("Upscaler must be Off or 2×.");
+        var outputWidth = checked(width * scale); var outputHeight = checked(height * scale);
+        ValidateDimensions(outputWidth, outputHeight);
+        return (outputWidth, outputHeight);
+    }
+
+    // DLSS supplies all RGB pixels. Only transparency needs a spatial resize.
+    internal static ImagePixels UpscaledAlpha(ImagePixels source, bool pano)
+    {
+        var (width, height) = OutputSize(source.Width, source.Height, 2);
+        var output = new byte[checked(width * height * 4)];
+        Parallel.For(0, height, y =>
+        {
+            double sy = (y + .5) / 2 - .5; var top = (int)Math.Floor(sy); var fy = sy - top;
+            int y0 = Math.Clamp(top, 0, source.Height - 1), y1 = Math.Clamp(top + 1, 0, source.Height - 1);
+            for (var x = 0; x < width; x++)
+            {
+                double sx = (x + .5) / 2 - .5; var left = (int)Math.Floor(sx); var fx = sx - left;
+                int X(int column) => pano ? (column + source.Width) % source.Width : Math.Clamp(column, 0, source.Width - 1);
+                double A(int column, int row) => source.Bgra[(row * source.Width + column) * 4 + 3];
+                var x0 = X(left); var x1 = X(left + 1);
+                var above = A(x0, y0) * (1 - fx) + A(x1, y0) * fx;
+                var below = A(x0, y1) * (1 - fx) + A(x1, y1) * fx;
+                output[(y * width + x) * 4 + 3] = Round(above * (1 - fy) + below * fy);
+            }
+        });
+        return new(width, height, output, source.DpiX, source.DpiY);
+    }
+
+    internal static void SetRgb(ImagePixels target, byte[] rgb)
+    {
+        if (rgb.Length != target.Width * target.Height * 3) throw new InvalidDataException("Incorrect upscaled frame size.");
+        Parallel.For(0, target.Height, y =>
+        {
+            for (int x = 0, s = y * target.Width * 4, n = y * target.Width * 3; x < target.Width; x++, s += 4, n += 3)
+            { target.Bgra[s] = rgb[n + 2]; target.Bgra[s + 1] = rgb[n + 1]; target.Bgra[s + 2] = rgb[n]; }
+        });
+    }
+
     public static void Offset(byte[] rgb, int width, int height, int offset)
     {
         var rowBytes = width * 3;

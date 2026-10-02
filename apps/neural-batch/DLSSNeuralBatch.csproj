@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>DLSSNeuralBatch</AssemblyName>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Company>Reality3D</Company>
     <Product>DLSS Neural Batch</Product>
   </PropertyGroup>

@@ -25,10 +25,16 @@ internal partial class MainWindow : Window, INotifyPropertyChanged
     private ImageProcessor? processor;
     public int Mix { get => settings.Mix; set { settings.Mix = Math.Clamp(value, 0, 200); Changed(nameof(Mix)); Refresh(); } }
     public bool Pano { get => settings.Pano; set { settings.Pano = value; Changed(nameof(Pano)); } }
+    public IReadOnlyList<UpscaleChoice> UpscaleChoices { get; } = new[] { new UpscaleChoice("Off — original size", 1), new UpscaleChoice("2× — DLSS Super Resolution", 2) };
+    public UpscaleChoice SelectedUpscale
+    {
+        get => UpscaleChoices[settings.Scale == 2 ? 1 : 0];
+        set { if (value == null) return; settings.Scale = value.Scale; Changed(nameof(SelectedUpscale)); Refresh(); }
+    }
     public string OutputFolder { get => settings.OutputFolder; set { settings.OutputFolder = value; Changed(nameof(OutputFolder)); Refresh(); } }
     public bool IsRunning => cancellation != null;
     public bool CanConfigure => !IsRunning && !configuring;
-    public bool CanStart => CanConfigure && Jobs.Any(job => job.State == JobState.Queued) && (Mix == 0 || File.Exists(Settings.Renderer)) && !string.IsNullOrWhiteSpace(OutputFolder);
+    public bool CanStart => CanConfigure && Jobs.Any(job => job.State == JobState.Queued) && (Mix == 0 && settings.Scale == 1 || File.Exists(Settings.Renderer)) && !string.IsNullOrWhiteSpace(OutputFolder);
     public string Counts => $"{Jobs.Count(job => job.State == JobState.Queued)} waiting · {Jobs.Count(job => job.State == JobState.Done)} done · {Jobs.Count(job => job.State == JobState.Failed)} failed";
     public string RendererStatus { get => rendererStatus; private set { rendererStatus = value; Changed(nameof(RendererStatus)); } }
     public string CurrentStatus { get => current; private set { current = value; Changed(nameof(CurrentStatus)); } }
@@ -38,7 +44,7 @@ internal partial class MainWindow : Window, INotifyPropertyChanged
 
     public MainWindow()
     {
-        InitializeComponent(); settings.Mix = Math.Clamp(settings.Mix, 0, 200); DataContext = this;
+        InitializeComponent(); settings.Mix = Math.Clamp(settings.Mix, 0, 200); settings.Scale = settings.Scale == 2 ? 2 : 1; DataContext = this;
         RendererStatus = File.Exists(Settings.Renderer) ? "Renderer ready · images stay on this computer" : "Choose the video player executable to set up the renderer";
         elapsed.Tick += (_, _) =>
         {
@@ -47,7 +53,7 @@ internal partial class MainWindow : Window, INotifyPropertyChanged
             CurrentStatus = phase + $" · {(int)duration.TotalMinutes}:{duration.Seconds:00} elapsed";
         };
         Jobs.CollectionChanged += (_, _) => Refresh();
-        Log("DLSS Neural Batch v0.1.0 ready. Add images, choose Mix and Pano, then start.");
+        Log("DLSS Neural Batch v0.2.0 ready. Add images, choose Mix, Upscaler and Pano, then start.");
     }
     private void Changed(string name) => PropertyChanged?.Invoke(this, new(name));
     private void Refresh() { Changed(nameof(CanStart)); Changed(nameof(CanConfigure)); Changed(nameof(IsRunning)); Changed(nameof(Counts)); Changed(nameof(PauseText)); }
@@ -135,10 +141,10 @@ internal partial class MainWindow : Window, INotifyPropertyChanged
             Directory.CreateDirectory(OutputFolder); settings.Save();
         }
         catch (Exception error) { Log(error.Message); return; }
-        var options = new BatchOptions(Mix, Pano, Path.GetFullPath(OutputFolder));
+        var options = new BatchOptions(Mix, Pano, Path.GetFullPath(OutputFolder), settings.Scale);
         processor ??= new(Settings.Renderer, Path.Combine(Settings.Root, "Work"));
         cancellation = new(); started = DateTime.Now; elapsed.Start(); Progress = 0; Refresh();
-        Log($"Queue started · Mix {Mix}% · Pano {(Pano ? "On" : "Off")} · PNG output.");
+        Log($"Queue started · Mix {Mix}% · Upscaler {(settings.Scale == 2 ? "DLSS 2×" : "Off")} · Pano {(Pano ? "On" : "Off")} · PNG output.");
         try
         {
             await queue.RunAsync(Jobs, async (job, token) =>
@@ -151,7 +157,7 @@ internal partial class MainWindow : Window, INotifyPropertyChanged
                     job.Status = progress.Phase;
                     if (progress.Size != null) job.Size = progress.Size;
                     phase = job.FileName + " · " + progress.Phase; CurrentStatus = phase;
-                    Log(job.FileName + " · " + progress.Phase);
+                    Log(job.FileName + " · " + progress.Phase + (progress.Size == null ? "" : " · " + progress.Size));
                 }), token);
                 Log("Saved " + output); return output;
             }, (job, error) => Log(job.FileName + " failed: " + error.Message), cancellation.Token);

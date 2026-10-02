@@ -4,7 +4,7 @@ Unicode True
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
 !define PRODUCT "DLSS Neural Batch"
-!define VERSION "0.1.0"
+!define VERSION "0.2.0"
 !define STAGE "..\dist\portable"
 !define KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\DLSSNeuralBatch"
 Name "${PRODUCT}"
@@ -13,7 +13,7 @@ InstallDir "$LOCALAPPDATA\DLSSNeuralBatch"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 ShowInstDetails show
-VIProductVersion "0.1.0.0"
+VIProductVersion "0.2.0.0"
 VIAddVersionKey "ProductName" "${PRODUCT}"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "${PRODUCT} setup"

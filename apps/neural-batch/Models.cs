@@ -26,7 +26,8 @@ internal sealed class ImageJob(string inputPath) : NotifyObject
     public string Size { get => size; set { size = value; Notify(); } }
 }
 
-internal sealed record BatchOptions(int Mix, bool Pano, string OutputFolder);
+internal sealed record BatchOptions(int Mix, bool Pano, string OutputFolder, int Scale = 1);
+internal sealed record UpscaleChoice(string Label, int Scale);
 internal sealed record ImagePixels(int Width, int Height, byte[] Bgra, double DpiX = 96, double DpiY = 96);
 internal sealed record JobProgress(string Phase, int Percent, string? Size = null);
 
@@ -34,6 +35,7 @@ internal sealed class Settings
 {
     public int Mix { get; set; } = 100;
     public bool Pano { get; set; }
+    public int Scale { get; set; } = 1;
     public string OutputFolder { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "DLSS Neural Mix");
     public string PlayerExe { get; set; } = "";
     public static string Root => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DLSSNeuralBatch");

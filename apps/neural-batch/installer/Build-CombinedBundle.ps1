@@ -49,7 +49,9 @@ DLSS Video Player + Photoshop Plugin + Neural Batch
 2. For the standalone image queue, run DLSS-Neural-Batch-Setup-win64.exe.
    During setup, browse to DLSS Video Player\DLSSVideoPlayer.exe inside
    this extracted bundle. Add images or folders, select Mix (0-200%), choose
-   an output folder, and start the queue. Enable Pano for a 360 panorama.
+   an output folder, and start the queue. Select 2x Upscaler to double the
+   image dimensions with DLSS Super Resolution. At 0% Mix it upscales only.
+   Enable Pano for a 360 panorama.
    Batch processing saves new PNG files and preserves your originals.
 
 3. For Photoshop, run DLSS-Neural-Mix-Setup-win64.exe and select the same
@@ -58,14 +60,14 @@ DLSS Video Player + Photoshop Plugin + Neural Batch
 
 4. To use the video player, open DLSS Video Player\DLSSVideoPlayer.exe.
 
-Included: Photoshop plugin 0.2.11 and DLSS Neural Batch 0.1.0.
+Included: Photoshop plugin 0.2.11 and DLSS Neural Batch 0.2.0.
 The batch app runs independently of Photoshop. Its installer bundles .NET
 and the C++ runtime used by its native helper. All processing stays local;
 the processing helpers run without a console window.
 
 A compatible NVIDIA RTX GPU and driver are required. Both installers copy
 the verified renderer from the included player folder. Images for Batch
-must be 64-8192 pixels per side and at most 64 megapixels.
+and outputs must be 64-8192 pixels per side and at most 64 megapixels.
 
 Detailed batch instructions: DLSS Neural Batch\README.md
 Player instructions: DLSS Video Player\README.md
