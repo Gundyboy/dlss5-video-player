@@ -4,7 +4,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const controls = new Map();
-for (const id of ["mix", "mixNumber", "process", "pano", "status", "log"])
+for (const id of ["mix", "mixNumber", "process", "pano", "clearCache", "status", "log"])
   controls.set(id, { dataset: {}, addEventListener() {}, childNodes: [], scrollTop: 0, clientHeight: 100, scrollHeight: 0,
     appendChild(node) { this.childNodes.push(node); }, removeChild() { this.childNodes.shift(); } });
 const context = {

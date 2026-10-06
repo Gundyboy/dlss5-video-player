@@ -3,12 +3,13 @@ const { entrypoints, shell, storage } = require("uxp");
 
 // UXP's manifest allowlist rejects numeric loopback addresses in Photoshop.
 const endpoint = "http://localhost:47837";
-const panelVersion = "0.2.11";
+const panelVersion = "0.2.12";
 const fs = storage.localFileSystem;
 const slider = document.getElementById("mix");
 const number = document.getElementById("mixNumber");
 const button = document.getElementById("process");
 const panoButton = document.getElementById("pano");
+const clearCacheButton = document.getElementById("clearCache");
 const status = document.getElementById("status");
 const log = document.getElementById("log");
 let busy = false;
@@ -458,6 +459,7 @@ async function processSelectedLayer() {
   busy = true;
   button.disabled = true;
   panoButton.disabled = true;
+  clearCacheButton.disabled = true;
   button.textContent = "Processing selected layer…";
   try {
     await finishActiveToolEdit();
@@ -501,8 +503,37 @@ async function processSelectedLayer() {
     busy = false;
     button.disabled = false;
     panoButton.disabled = false;
+    clearCacheButton.disabled = false;
     button.textContent = "Apply to selected layer";
   }
 }
 
 button.addEventListener("click", processSelectedLayer);
+
+async function clearRenderCache() {
+  if (busy) return;
+  busy = true;
+  button.disabled = panoButton.disabled = clearCacheButton.disabled = true;
+  clearCacheButton.textContent = "Clearing…";
+  try {
+    setStatus("Clearing cached neural renders…");
+    await ensureBridge();
+    const response = await fetch(endpoint + "/cache/clear", { method: "POST" });
+    if (response.status === 404)
+      throw new Error("The running renderer needs updating. Close Photoshop and reinstall DLSS Neural Mix v0.2.12 or newer, then reopen Photoshop.");
+    if (!response.ok) throw new Error(await response.text());
+    const cleared = await response.json();
+    const megabytes = (cleared.bytes / (1024 * 1024)).toFixed(1);
+    setStatus(cleared.files === 0 ? "Cache is already empty." :
+      `Cache cleared: ${cleared.files} cached ${cleared.files === 1 ? "frame" : "frames"} removed (${megabytes} MB freed).`, "done");
+  } catch (error) {
+    setStatus("Could not clear cache: " + (error && error.message ? error.message : String(error)), "error");
+    console.error(error);
+  } finally {
+    busy = false;
+    button.disabled = panoButton.disabled = clearCacheButton.disabled = false;
+    clearCacheButton.textContent = "Clear cache";
+  }
+}
+
+clearCacheButton.addEventListener("click", clearRenderCache);

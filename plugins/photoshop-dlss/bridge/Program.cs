@@ -74,6 +74,10 @@ internal static class Program
                 response.ContentLength64 = body.Length;
                 await response.OutputStream.WriteAsync(body, 0, body.Length);
             }
+            else if (context.Request.HttpMethod == "POST" && path == "/cache/clear")
+            {
+                await ClearCache(response, Frames, RenderGate);
+            }
             else if (context.Request.HttpMethod == "POST" && path == "/render")
             {
                 // A client can receive the final RGB byte before this request
@@ -94,7 +98,7 @@ internal static class Program
         }
         catch (Exception error)
         {
-            Log("Render failed: " + error);
+            Log("Bridge request failed: " + error);
             if (response.OutputStream.CanWrite)
             {
                 try { await WriteText(response, 500, error.Message); }
@@ -102,6 +106,27 @@ internal static class Program
             }
         }
         finally { try { response.Close(); } catch { } }
+    }
+
+    internal static async Task ClearCache(HttpListenerResponse response, RenderCache cache, SemaphoreSlim gate)
+    {
+        // Share the render lock: never delete a frame being sent or cached,
+        // including when another panel is using the bridge.
+        if (!await gate.WaitAsync(0))
+        {
+            await WriteText(response, 409, "An image is still processing. Wait until it finishes, then clear the cache.");
+            return;
+        }
+        try
+        {
+            var cleared = cache.Clear();
+            var body = JsonSerializer.SerializeToUtf8Bytes(new { files = cleared.Files, bytes = cleared.Bytes });
+            response.StatusCode = 200;
+            response.ContentType = "application/json";
+            response.ContentLength64 = body.Length;
+            await response.OutputStream.WriteAsync(body);
+        }
+        finally { gate.Release(); }
     }
 
     private static async Task Render(HttpListenerContext context)

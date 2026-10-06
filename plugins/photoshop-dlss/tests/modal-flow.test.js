@@ -4,7 +4,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const controls = new Map();
-for (const id of ["mix", "mixNumber", "process", "pano", "status", "log"])
+for (const id of ["mix", "mixNumber", "process", "pano", "clearCache", "status", "log"])
   controls.set(id, { value: "50", dataset: {}, setAttribute(key, value) { this[key] = value; }, addEventListener(event, callback) { this[event] = callback; } });
 const log = controls.get("log");
 log.childNodes = [];
@@ -178,6 +178,7 @@ const context = {
     if (url.endsWith("/health"))
       return { ok: true, headers: { get() { return "3"; } } };
     if (url.endsWith("/render")) {
+      assert.equal(controls.get("clearCache").disabled, true, "cache clearing must be disabled throughout rendering");
       assert.equal(modalDepth, 0, "neural rendering must not hold Photoshop modal");
       assert.equal(capturedDisposed, true, "capture must be released before rendering");
       renders++;
@@ -287,9 +288,48 @@ controls.get("process").click().then(async () => {
   assert.match(html, /id="mix"[^>]+max="200"/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
   assert.deepEqual(manifest.requiredPermissions.network.domains, ["http://localhost:47837"]);
+  assert.equal(controls.get("clearCache").disabled, false);
+  photoshop.app.activeDocument = null;
+  const originalFetch = context.fetch;
+  let clears = 0;
+  let finishClear;
+  context.fetch = async (url, options) => {
+    if (url.endsWith("/health")) return originalFetch(url);
+    assert.ok(url.endsWith("/cache/clear"));
+    assert.equal(options.method, "POST");
+    assert.equal(modalDepth, 0, "cache clearing must not acquire a Photoshop modal scope");
+    for (const id of ["process", "pano", "clearCache"])
+      assert.equal(controls.get(id).disabled, true, "all action buttons must be disabled during cache clearing");
+    clears++;
+    await new Promise(resolve => { finishClear = resolve; });
+    return { ok: true, status: 200, async json() { return { files: 2, bytes: 3 * 1024 * 1024 }; } };
+  };
+  const clearing = controls.get("clearCache").click();
+  while (!finishClear) await Promise.resolve();
+  await controls.get("clearCache").click();
+  await controls.get("process").click();
+  assert.equal(clears, 1, "busy clicks must not send another request");
+  finishClear();
+  await clearing;
+  assert.match(controls.get("status").textContent, /2 cached frames removed \(3\.0 MB freed\)/);
+  assert.ok(log.childNodes.some(entry => /Second panorama render failed/.test(entry.textContent)), "clearing frames must keep previous activity entries");
+  for (const [code, message, expected] of [
+    [200, "", /already empty/],
+    [404, "Unknown bridge endpoint", /reinstall DLSS Neural Mix v0\.2\.12/],
+    [409, "An image is still processing.", /still processing/],
+    [500, "Access to the cache file is denied.", /Access to the cache file/]
+  ]) {
+    context.fetch = async url => url.endsWith("/health") ? originalFetch(url) :
+      { ok: code === 200, status: code, async json() { return { files: 0, bytes: 0 }; }, async text() { return message; } };
+    await controls.get("clearCache").click();
+    assert.match(controls.get("status").textContent, expected);
+    assert.equal(controls.get("status").dataset.state, code === 200 ? "done" : "error");
+    for (const id of ["process", "pano", "clearCache"]) assert.equal(controls.get(id).disabled, false);
+    assert.equal(controls.get("clearCache").textContent, "Clear cache");
+  }
   context.fetch = async () => { throw new Error("Permission denied to the url. Manifest entry not found."); };
   await assert.rejects(context.ensureBridge(), /Photoshop blocked the local renderer connection/);
   context.fetch = async () => { throw new Error("Connection refused"); };
   assert.equal(await context.bridgeVersion(), 0, "An offline bridge should trigger startup");
-  console.log("Modal capture, Pano/Mix rendering, failure cleanup, Smart Object insertion, and bridge permissions passed.");
+  console.log("Modal capture, Pano/Mix rendering, cache clearing, failure cleanup, Smart Object insertion, and bridge permissions passed.");
 }).catch(error => { console.error(error); process.exitCode = 1; });

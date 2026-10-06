@@ -48,4 +48,22 @@ internal sealed class RenderCache
 
     internal static string SettingsFingerprint(string path) => File.Exists(path)
         ? Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))) : "missing";
+
+    internal (int Files, long Bytes) Clear()
+    {
+        // Invalidate keys first, including after a partial deletion failure.
+        // Inspect every owned slot so files left by an earlier bridge also go.
+        entries.Clear();
+        var files = 0;
+        long bytes = 0;
+        foreach (var slot in slots)
+        {
+            if (!File.Exists(slot)) continue;
+            var length = new FileInfo(slot).Length;
+            File.Delete(slot);
+            files++;
+            bytes += length;
+        }
+        return (files, bytes);
+    }
 }

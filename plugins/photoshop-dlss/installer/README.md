@@ -32,7 +32,9 @@ Setup stops the previous idle renderer bridge. After Adobe installs and setup
 verifies the new plugin, setup archives older copies outside Adobe's plugin
 search folder. Photoshop can otherwise keep choosing v0.2.0 even after a restart.
 Backups are retained in `%LOCALAPPDATA%\DLSSNeuralMix\PluginBackups`.
-The panel header and activity log show v0.2.11 after this update.
+The panel header and activity log show v0.2.12 after this update.
+Use **Clear cache** beside the activity log to remove cached neural frames.
+It reports the freed space and is disabled during processing.
 Enable **Pano: On** for a full-width 360° panorama layer. It renders two views
 and blends the offset view around the left/right seam before applying Mix.
 

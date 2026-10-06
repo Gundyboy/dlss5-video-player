@@ -44,7 +44,31 @@ try
     Check(RenderCache.SettingsFingerprint(settings) == fingerprint, "Touching unchanged settings must preserve both cached views.");
     File.WriteAllText(settings, "NRPreUpscale=1\n");
     Check(RenderCache.SettingsFingerprint(settings) != fingerprint, "Changed rendering settings must invalidate the cached views.");
-    Console.WriteLine("Two-view cache reuse, eviction, frame integrity, and settings invalidation tests passed.");
+
+    first = Frame("original", 10);
+    second = Frame("offset", 20);
+    var cleared = frames.Clear();
+    Check(cleared.Files == 2 && cleared.Bytes == 6, "Clearing must report both frames and their size.");
+    Check(!File.Exists(first) && !File.Exists(second), "Clearing must delete both owned disk slots.");
+    Check(frames.TryGet("original", 3) == null && frames.TryGet("offset", 3) == null, "Clearing must invalidate the in-memory keys.");
+    Check(File.Exists(settings), "Clearing must retain unrelated files in the work directory.");
+    Check(frames.Clear() == (0, 0L), "Clearing an empty cache must be safe and idempotent.");
+    Frame("original", 30);
+    Frame("offset", 40);
+    var restarted = new RenderCache(fixture);
+    Check(restarted.Clear() == (2, 6L), "Clearing must delete frames from a previous session with no in-memory keys.");
+    frames.Clear();
+    first = Frame("original", 50);
+    using (var locked = new FileStream(first, FileMode.Open, FileAccess.Read, FileShare.Read))
+    {
+        try { frames.Clear(); throw new Exception("A locked cache file must report failure."); }
+        catch (IOException) { }
+        Check(frames.TryGet("original", 3) == null, "A failed clear must still invalidate cached keys.");
+    }
+    Check(frames.Clear() == (1, 3L), "A failed deletion must be retryable once the file unlocks.");
+    first = Frame("after-clear", 60);
+    Check(frames.TryGet("after-clear", 3) == first, "Rendering must be able to populate the cache after clearing.");
+    Console.WriteLine("Two-view cache reuse, eviction, integrity, settings invalidation, and safe cache clearing passed.");
 }
 finally
 {

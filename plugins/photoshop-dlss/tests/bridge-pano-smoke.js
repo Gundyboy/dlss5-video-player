@@ -10,7 +10,7 @@ const endpoint = "http://localhost:47837";
 const pluginRoot = path.resolve(__dirname, "..");
 const executable = path.join(pluginRoot, "dist/bridge-build/DLSSPhotoshopBridge.exe");
 const controls = new Map();
-for (const id of ["mix", "mixNumber", "process", "pano", "status", "log"])
+for (const id of ["mix", "mixNumber", "process", "pano", "clearCache", "status", "log"])
   controls.set(id, { dataset: {}, addEventListener() {}, childNodes: [], scrollTop: 0, clientHeight: 100, scrollHeight: 0,
     appendChild(node) { this.childNodes.push(node); }, removeChild() { this.childNodes.shift(); } });
 const cacheStates = [];

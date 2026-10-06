@@ -62,7 +62,10 @@
     #status[data-state="done"] { border-left: 3px solid #54ae72; }
     #status[data-state="error"] { border-left: 3px solid #d36c67; }
     #status[data-state="working"] { border-left: 3px solid #8e83e4; }
-    .log-heading { margin: 16px 0 6px; opacity: .72; font-size: 11px; font-weight: 700; }
+    .log-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 8px; margin: 16px 0 6px; }
+    .log-heading { margin: 0; opacity: .72; font-size: 11px; font-weight: 700; }
+    #clearCache { flex: 0 0 auto; min-height: 28px; padding: 4px 8px; border: 1px solid rgba(128, 128, 128, .7); border-radius: 6px; background: rgba(128, 128, 128, .1); color: inherit; font: 11px sans-serif; cursor: pointer; }
+    #clearCache:disabled { opacity: .55; cursor: default; }
     #log {
       flex: 1 1 145px; min-height: 90px; overflow: auto;
       padding: 9px 10px; border: 1px solid rgba(128, 128, 128, .5);
@@ -84,7 +87,7 @@
     <header class="brand">
       <div class="mark" aria-hidden="true">N</div>
       <div class="brand-text">
-        <p class="eyebrow">Photoshop neural filter · v0.2.11</p>
+        <p class="eyebrow">Photoshop neural filter · v0.2.12</p>
         <h1>DLSS Neural Mix</h1>
       </div>
     </header>
@@ -119,7 +122,10 @@
 
     <p class="activity-title">Progress</p>
     <div id="status" role="status" aria-live="polite" data-state="ready">Ready. Select a layer, choose Mix, then apply.</div>
-    <p class="log-heading">Activity log</p>
+    <div class="log-toolbar">
+      <p class="log-heading">Activity log</p>
+      <button id="clearCache" type="button" title="Remove cached neural renders. Your layers and activity log are kept." aria-label="Clear cached neural renders">Clear cache</button>
+    </div>
     <div id="log" role="log" aria-live="polite" aria-label="Processing activity"></div>
     <footer class="credit">Made by Will</footer>
   </main>

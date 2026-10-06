@@ -4,4 +4,6 @@
 /bridge/obj/
 /tests/bridge-cache/bin/
 /tests/bridge-cache/obj/
+/tests/cache-endpoint/bin/
+/tests/cache-endpoint/obj/
 /.dotnet/

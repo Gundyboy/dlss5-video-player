@@ -10,7 +10,7 @@ ratio extension, preserving the neural frame's hue rather than extrapolating
 RGB channel values past their valid range.
 
 The panel has a strength control, a Pano toggle, an Apply button, progress, and a bounded
-activity log. Its preferred height is 700 pixels when docked and 760 when
+activity log with a **Clear cache** button. Its preferred height is 700 pixels when docked and 760 when
 floating. Photoshop allows resizing within the manifest bounds where its
 workspace permits; the content scrolls in smaller panels and the log grows in
 taller ones.
@@ -49,6 +49,11 @@ finished job's work files are removed. It remembers the two most recent neural
 RGB frames on disk, so changing Mix on the same unchanged regular layer or
 panorama does not invoke the model again. Cache keys include pixels, dimensions,
 runner/worker versions, and the rendering settings contents.
+
+**Clear cache** removes those cached frames, including files left from an earlier
+session, and reports the freed disk space in Progress and the activity log. The
+next Apply renders again. It keeps your Photoshop layers, settings, and logs.
+Cache clearing does not require an open document and cannot run during a render.
 
 The panel reads RGB pixels at 8 bits per component. A layer must be at least
 64 × 64, no more than 8192 pixels on either side, and at most 64 megapixels.
@@ -94,6 +99,10 @@ it through Adobe UXP Developer Tool. It tests 50%, 100%, 200%, and 0% in a tempo
 document. Inspect `globalThis.__dlssDiagnostic` in the development console for
 the result. This check uses the real local GPU renderer and may prompt to open
 the bridge on first use. Never include this test script in a release package.
+
+Run `dotnet run --project tests/cache-endpoint/CacheEndpoint.Tests.csproj` for
+cache clearing's HTTP response and render lock checks. It uses private temporary
+frames and a separate loopback listener without touching the installed cache.
 
 After `Build-Installer.ps1`, run `node tests/bridge-pano-smoke.js` with the local
 renderer installed and no existing bridge running. It starts the rebuilt bridge
