@@ -3,7 +3,7 @@ const { entrypoints, shell, storage } = require("uxp");
 
 // UXP's manifest allowlist rejects numeric loopback addresses in Photoshop.
 const endpoint = "http://localhost:47837";
-const panelVersion = "0.2.13";
+const panelVersion = "0.2.14";
 const fs = storage.localFileSystem;
 const slider = document.getElementById("mix");
 const number = document.getElementById("mixNumber");
@@ -183,10 +183,15 @@ async function finishActiveToolEdit() {
   appendLog("Committed the active Photoshop tool edit.");
 }
 
+function isSmartObjectReadError(error) {
+  return Number(error && (error.number || error.code)) === -32005 ||
+    /could not update smart object files|could not place (?:the )?document|-32005/i.test(String(error));
+}
+
 async function captureSelectedLayer(documentId, layerId) {
   // Photoshop requires the imaging read to run inside a modal scope. Copy the
   // pixels and release that scope before the potentially long neural render.
-  return core.executeAsModal(async () => {
+  return core.executeAsModal(async executionContext => {
     const current = app.activeDocument;
     if (!current || current.id !== documentId ||
         current.activeLayers.length !== 1 || current.activeLayers[0].id !== layerId)
@@ -225,12 +230,12 @@ async function captureSelectedLayer(documentId, layerId) {
     try {
       return await readPixels(documentId, layerId);
     } catch (error) {
-      if (!/could not update smart object files/i.test(String(error))) throw error;
+      if (!isSmartObjectReadError(error)) throw error;
       const isPixel = selected.kind === constants.LayerKind.NORMAL;
       const isSmart = selected.kind === constants.LayerKind.SMARTOBJECT;
       if (!isPixel && !isSmart)
         throw new Error("Photoshop could not read this layer type. Select a flattened pixel layer and retry. Photoshop reported: " + String(error));
-      appendLog(`Photoshop could not read the ${isSmart ? "Smart Object" : "pixel layer"} directly; isolating the selected layer.`);
+      appendLog(`Photoshop could not read the ${isSmart ? "Smart Object" : "pixel layer"} directly; recovering the selected layer. ${String(error)}`);
       const originalBounds = selected.boundsNoEffects;
       const layerWidth = originalBounds.right - originalBounds.left;
       const layerHeight = originalBounds.bottom - originalBounds.top;
@@ -238,39 +243,75 @@ async function captureSelectedLayer(documentId, layerId) {
         throw new Error(`The selected layer is ${layerWidth} × ${layerHeight} pixels. DLSS Neural Rendering supports up to 8192 pixels per side and 64 megapixels.`);
       if (current.width > 8192 || current.height > 8192 || current.width * current.height > 64000000)
         throw new Error("The document canvas is too large for isolated capture. Use a smaller canvas for this layer.");
-      let scratch;
-      try {
-        scratch = await app.createDocument({
-          width: current.width, height: current.height, resolution: current.resolution,
-          mode: "RGBColorMode", fill: "transparent", depth: 8,
-          name: "DLSS temporary layer capture"
-        });
-        const copy = await selected.duplicate(scratch);
-        for (const other of [...scratch.layers])
-          if (other.id !== copy.id) await other.delete();
-        let isolated;
+      async function restoreSource() {
+        app.activeDocument = current;
+        if (current.activeLayers.length !== 1 || current.activeLayers[0].id !== layerId)
+          await action.batchPlay([{ _obj: "select", _target: [{ _ref: "layer", _id: layerId }], makeVisible: false }], {});
+      }
+      async function readIsolatedLayer(sourceLayer, smart) {
+        let scratch;
         try {
-          isolated = await readPixels(scratch.id, copy.id);
-        } catch (copyError) {
-          if (!isSmart || !/could not update smart object files/i.test(String(copyError))) throw copyError;
-          appendLog("Isolated Smart Object still needs an update; rasterizing its temporary copy.");
-          await copy.rasterize(constants.RasterizeType.ENTIRELAYER);
-          isolated = await readPixels(scratch.id, copy.id);
-        }
-        if (isolated.width !== layerWidth || isolated.height !== layerHeight)
-          throw new Error("The selected layer changed size when isolated for capture.");
-        isolated.bounds = originalBounds;
-        return isolated;
-      } catch (fallbackError) {
-        throw new Error(`Photoshop could not read the selected ${isSmart ? "Smart Object" : "pixel layer"}, even in an isolated document. Check any linked Smart Object source and finish active tool edits. Photoshop reported: ` + String(fallbackError));
-      } finally {
-        try {
-          if (scratch) await scratch.closeWithoutSaving();
+          scratch = await app.createDocument({
+            width: current.width, height: current.height, resolution: current.resolution,
+            mode: "RGBColorMode", fill: "transparent", depth: 8,
+            name: "DLSS temporary layer capture"
+          });
+          executionContext.hostControl.registerAutoCloseDocument(scratch.id);
+          const copy = await sourceLayer.duplicate(scratch);
+          for (const other of [...scratch.layers])
+            if (other.id !== copy.id) await other.delete();
+          let isolated;
+          try {
+            isolated = await readPixels(scratch.id, copy.id);
+          } catch (copyError) {
+            if (!smart || !isSmartObjectReadError(copyError)) throw copyError;
+            appendLog("Isolated Smart Object still needs an update; rasterizing its temporary copy.");
+            await copy.rasterize(constants.RasterizeType.ENTIRELAYER);
+            isolated = await readPixels(scratch.id, copy.id);
+          }
+          if (isolated.width !== layerWidth || isolated.height !== layerHeight)
+            throw new Error("The selected layer changed size when isolated for capture.");
+          isolated.bounds = originalBounds;
+          return isolated;
         } finally {
-          app.activeDocument = current;
-          if (current.activeLayers.length !== 1 || current.activeLayers[0].id !== layerId)
-            await action.batchPlay([{ _obj: "select", _target: [{ _ref: "layer", _id: layerId }], makeVisible: false }], {});
+          try {
+            if (scratch) {
+              await scratch.closeWithoutSaving();
+              executionContext.hostControl.unregisterAutoCloseDocument(scratch.id);
+            }
+          } finally { await restoreSource(); }
         }
+      }
+      async function readRasterizedSourceCopy() {
+        // Rasterize a duplicate in the source document before any cross-document
+        // placement. Roll back the temporary source edits, including on failure.
+        appendLog("Reading a temporary rasterized copy; the original Smart Object is kept.");
+        const suspension = await executionContext.hostControl.suspendHistory({ documentID: documentId, name: "DLSS temporary pixel capture" });
+        try {
+          const copy = await selected.duplicate();
+          await copy.rasterize(constants.RasterizeType.ENTIRELAYER);
+          try { return await readPixels(documentId, copy.id); }
+          catch (copyError) {
+            if (!isSmartObjectReadError(copyError)) throw copyError;
+            return await readIsolatedLayer(copy, false);
+          }
+        } finally {
+          try { await executionContext.hostControl.resumeHistory(suspension, false); }
+          finally { await restoreSource(); }
+        }
+      }
+      try {
+        // Placement failures should not place another Smart Object into a new
+        // document. Capture a flat copy in place instead.
+        if (isSmart && /could not place|-32005/i.test(String(error)))
+          return await readRasterizedSourceCopy();
+        try { return await readIsolatedLayer(selected, isSmart); }
+        catch (isolationError) {
+          if (!isSmart || !isSmartObjectReadError(isolationError)) throw isolationError;
+          return await readRasterizedSourceCopy();
+        }
+      } catch (fallbackError) {
+        throw new Error(`Photoshop could not read the selected ${isSmart ? "Smart Object" : "pixel layer"}, even in an isolated document or temporary pixel copy. Check any linked Smart Object source and finish active tool edits. Photoshop reported: ` + String(fallbackError));
       }
     }
   }, { commandName: "Read selected layer" });
@@ -520,7 +561,7 @@ async function clearRenderCache() {
     await ensureBridge();
     const response = await fetch(endpoint + "/player-cache/clear", { method: "POST" });
     if (response.status === 404)
-      throw new Error("The running renderer needs updating. Close Photoshop and reinstall DLSS Neural Mix v0.2.13 or newer, then reopen Photoshop.");
+      throw new Error("The running renderer needs updating. Close Photoshop and reinstall DLSS Neural Mix v0.2.14 or newer, then reopen Photoshop.");
     if (!response.ok) throw new Error(await response.text());
     const cleared = await response.json();
     const megabytes = (cleared.bytes / (1024 * 1024)).toFixed(1);

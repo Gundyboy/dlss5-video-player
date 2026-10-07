@@ -34,6 +34,14 @@ let starterDeleted = 0;
 let insertions = 0;
 let renderFrame = () => new Uint8Array(64 * 64 * 3).fill(200);
 let failOnRender = 0;
+let smartReadMessage = "Photoshop Error. Code: -1. Message: Could not update smart object files ^0.";
+let failSmartPlacement = false;
+let failSourceRaster = false;
+let failSourceRead = false;
+let historyRollbacks = 0;
+let sourceRasterizations = 0;
+let sourceComponents = 3;
+const autoCloseDocuments = new Set();
 const original = {
   id: 1, name: "Flattened artwork", kind: "pixel", opacity: 100, blendMode: "normal",
   boundsNoEffects: { left: 4, top: 6, right: 68, bottom: 70 },
@@ -56,7 +64,22 @@ const smartOriginal = {
   boundsNoEffects: { left: 4, top: 6, right: 68, bottom: 70 },
   async duplicate(target) {
     assert.equal(modalDepth, 1);
+    if (!target) {
+      const copy = { id: 11, kind: "smartObject", async rasterize() {
+        sourceRasterizations++;
+        if (failSourceRaster) throw new Error("Could not rasterize ^0.");
+        this.kind = "pixel";
+      }, async duplicate(scratch) {
+        assert.equal(this.kind, "pixel", "cross-document recovery must copy pixels, not place a Smart Object");
+        const isolated = { id: 6, kind: "pixel" };
+        scratch.layers.unshift(isolated); scratch.activeLayers = [isolated];
+        return isolated;
+      } };
+      document.layers.unshift(copy); document.activeLayers = [copy];
+      return copy;
+    }
     assert.equal(target.id, 8, "Smart Objects should be isolated outside the source document");
+    if (failSmartPlacement) throw new Error("Photoshop Error. Code: -32005. Message: Could not place the document ^0.");
     const copy = {
       id: 5,
       async rasterize(target) {
@@ -74,6 +97,7 @@ const document = {
   id: 7,
   width: 128, height: 128, resolution: 72,
   activeLayers: [original],
+  layers: [original, smartOriginal],
   async createPixelLayer({ name }) {
     assert.equal(modalDepth, 1);
     insertions++;
@@ -116,7 +140,20 @@ const photoshop = {
     async executeAsModal(callback) {
       assert.equal(modalDepth, 0, "modal scopes must not nest");
       modalDepth++;
-      try { return await callback(); }
+      const hostControl = {
+        registerAutoCloseDocument(id) { autoCloseDocuments.add(id); },
+        unregisterAutoCloseDocument(id) { autoCloseDocuments.delete(id); },
+        async suspendHistory({ documentID }) {
+          assert.equal(documentID, document.id);
+          return { layers: [...document.layers], activeLayers: [...document.activeLayers] };
+        },
+        async resumeHistory(saved, commit) {
+          assert.equal(commit, false, "temporary source edits must be rolled back, never committed");
+          document.layers = saved.layers; document.activeLayers = saved.activeLayers;
+          historyRollbacks++;
+        }
+      };
+      try { return await callback({ hostControl }); }
       finally { modalDepth--; }
     }
   },
@@ -136,20 +173,23 @@ const photoshop = {
       assert.equal(modalDepth, 1, "pixel capture needs a modal scope");
       captures++;
       if (layerID === original.id && layeredReadFails)
-        throw new Error("Photoshop Error. Code: -1. Message: Could not update smart object files ^0.");
+        throw new Error(smartReadMessage);
+      if (layerID === 11 && failSourceRead) throw new Error("Photoshop Error. Code: -32005. Message: Could not place the document ^0.");
       if (layerID === 6 && isolatedReadFails)
         throw new Error("Isolated layer capture failed.");
       if (layerID === smartOriginal.id)
-        throw new Error("Photoshop Error. Code: -1. Message: Could not update smart object files ^0.");
+        throw new Error(smartReadMessage);
       if (layerID === 5 && failRasterRead && !smartRasterized)
         throw new Error("Photoshop Error. Code: -1. Message: Could not update smart object files ^0.");
       return {
         sourceBounds: { left: 4, top: 6 },
         imageData: {
-          width: 64, height: 64, components: 3,
+          width: 64, height: 64, components: sourceComponents,
           async getData() {
             assert.equal(modalDepth, 1, "pixel reading needs a modal scope");
-            return new Uint8Array(64 * 64 * 3).fill(100);
+            const data = new Uint8Array(64 * 64 * sourceComponents).fill(100);
+            if (sourceComponents === 4) for (let index = 3; index < data.length; index += 4) data[index] = 77;
+            return data;
           },
           dispose() { capturedDisposed = true; }
         }
@@ -284,6 +324,54 @@ controls.get("process").click().then(async () => {
   assert.deepEqual(Array.from(enhanced), [205, 205, 205, 77],
     "200% Mix must use the player's guarded linear-light luminance extension");
   const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+  failOnRender = 0;
+  isolatedReadFails = false;
+  failRasterRead = false;
+  controls.get("pano").click();
+  smartReadMessage = "Photoshop Error. Code: -32005. Message: Could not place the document ^0.";
+  sourceComponents = 4;
+  document.activeLayers = [smartOriginal];
+  const beforeRecovery = renders;
+  const beforeScratch = scratchClosed;
+  await controls.get("process").click();
+  assert.equal(renders, beforeRecovery + 1, "a placement error must recover and reach rendering without clearing the cache");
+  assert.equal(scratchClosed, beforeScratch, "placement recovery should avoid placing a Smart Object in another document");
+  assert.equal(historyRollbacks, 1);
+  assert.equal(sourceRasterizations, 1);
+  assert.equal(document.layers.length, 2, "temporary source duplicates must be rolled back");
+  assert.equal(smartOriginal.kind, "smartObject");
+  assert.equal(insertedPixels[3], 77, "recovered pixels must preserve source alpha");
+  assert.equal(insertedBounds.left, 4);
+  assert.equal(insertedBounds.top, 6);
+  smartReadMessage = "Photoshop Error. Code: -1. Message: Could not update smart object files ^0.";
+  failSmartPlacement = true;
+  document.activeLayers = [smartOriginal];
+  await controls.get("process").click();
+  assert.equal(renders, beforeRecovery + 2, "a placement error while isolating must recover through a source pixel copy");
+  assert.equal(historyRollbacks, 2);
+  assert.equal(scratchClosed, beforeScratch + 1);
+  failSmartPlacement = false;
+  smartReadMessage = "Photoshop Error. Code: -32005. Message: Could not place the document ^0.";
+  failSourceRead = true;
+  document.activeLayers = [smartOriginal];
+  await controls.get("process").click();
+  assert.equal(renders, beforeRecovery + 3, "an unreadable raster copy must be isolated as pixels");
+  assert.equal(historyRollbacks, 3);
+  assert.equal(scratchClosed, beforeScratch + 2);
+  assert.equal(document.layers.length, 2);
+  failSourceRead = false;
+  failSourceRaster = true;
+  document.activeLayers = [smartOriginal];
+  await controls.get("process").click();
+  assert.equal(renders, beforeRecovery + 3, "an unrecoverable rasterization failure must not start rendering");
+  assert.equal(historyRollbacks, 4, "failed temporary edits must also roll back");
+  assert.equal(document.layers.length, 2);
+  assert.equal(document.activeLayers[0].id, smartOriginal.id);
+  assert.equal(controls.get("status").dataset.state, "error");
+  assert.equal(controls.get("process").disabled, false);
+  assert.equal(autoCloseDocuments.size, 0, "no temporary capture documents may remain registered");
+  assert.equal(context.isSmartObjectReadError({ number: -32005 }), true);
+  assert.equal(context.isSmartObjectReadError(new Error("Permission denied")), false);
   assert.match(html, /id="mixNumber"[^>]+max="200"/);
   assert.match(html, /id="mix"[^>]+max="200"/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
@@ -316,7 +404,7 @@ controls.get("process").click().then(async () => {
   assert.ok(log.childNodes.some(entry => /Second panorama render failed/.test(entry.textContent)), "clearing frames must keep previous activity entries");
   for (const [code, message, expected] of [
     [200, "", /0\.0 MB freed/],
-    [404, "Unknown bridge endpoint", /reinstall DLSS Neural Mix v0\.2\.13/],
+    [404, "Unknown bridge endpoint", /reinstall DLSS Neural Mix v0\.2\.14/],
     [409, "An image is still processing.", /still processing/],
     [500, "Access to the cache file is denied.", /Access to the cache file/]
   ]) {

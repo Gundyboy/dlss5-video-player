@@ -65,12 +65,14 @@ Photoshop converts other document modes to sRGB for this pass. The worker
 accepts an opaque still image; the plugin restores the selected layer's alpha
 after neural rendering.
 The panel commits an active Photoshop tool edit before reading the selected
-layer. If Photoshop reports a Smart Object update error, the panel retries the
-selected Smart Object or pixel layer in a temporary RGB document containing
-only its duplicate. It rasterizes that temporary copy only if Photoshop still
-cannot read the Smart Object. The temporary document closes after capture and
-the source document is restored before rendering. A missing linked source may
-still need to be relinked in Photoshop. The layer name and type appear in the
+layer. If Photoshop reports a Smart Object update or placement error (-32005),
+the panel automatically recovers the selected layer. Placement errors use a
+rasterized duplicate inside the source document, avoiding another Smart Object
+placement. Other read errors first try an isolated RGB document containing only
+the selected layer. Temporary source edits are rolled back and temporary
+documents close before rendering; the original Smart Object and selection are
+preserved. Recovery does not clear the video player's cache. A missing linked
+source may still need to be relinked in Photoshop. The layer name and type appear in the
 activity log to help diagnose document-specific failures.
 
 ## Local development
@@ -103,6 +105,13 @@ it through Adobe UXP Developer Tool. It tests 50%, 100%, 200%, and 0% in a tempo
 document. Inspect `globalThis.__dlssDiagnostic` in the development console for
 the result. This check uses the real local GPU renderer and may prompt to open
 the bridge on first use. Never include this test script in a release package.
+
+For capture recovery checks without rendering, use `tests/photoshop-capture-live.js`
+in an isolated development plugin instead. Its header describes the development-only
+read hook. It injects placement failures into a private layered Smart Object fixture,
+checks pixel bytes and bounds, and verifies rollback on success and failure. Inspect
+`globalThis.__dlssCaptureDiagnostic` for its result. Keep the hook and script out of
+release packages.
 
 Run `dotnet run --project tests/cache-endpoint/CacheEndpoint.Tests.csproj` for
 cache clearing's HTTP response and render lock checks. It uses private temporary

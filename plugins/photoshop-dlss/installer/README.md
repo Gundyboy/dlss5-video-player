@@ -32,7 +32,9 @@ Setup stops the previous idle renderer bridge. After Adobe installs and setup
 verifies the new plugin, setup archives older copies outside Adobe's plugin
 search folder. Photoshop can otherwise keep choosing v0.2.0 even after a restart.
 Backups are retained in `%LOCALAPPDATA%\DLSSNeuralMix\PluginBackups`.
-The panel header and activity log show v0.2.13 after this update.
+The panel header and activity log show v0.2.14 after this update.
+This version recovers Photoshop's Smart Object placement/read errors using a
+temporary rasterized copy and rolls back the temporary source edits.
 Use **Clear cache** beside the activity log to clear the DLSS Video Player's
 cache. Setup remembers the player EXE you select; the button respects its current
 cache directory setting and reports the folder and freed space. Close that
