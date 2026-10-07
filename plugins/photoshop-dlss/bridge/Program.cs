@@ -74,9 +74,9 @@ internal static class Program
                 response.ContentLength64 = body.Length;
                 await response.OutputStream.WriteAsync(body, 0, body.Length);
             }
-            else if (context.Request.HttpMethod == "POST" && path == "/cache/clear")
+            else if (context.Request.HttpMethod == "POST" && path == "/player-cache/clear")
             {
-                await ClearCache(response, Frames, RenderGate);
+                await ClearCache(response, ClearPlayerCache, RenderGate);
             }
             else if (context.Request.HttpMethod == "POST" && path == "/render")
             {
@@ -108,7 +108,9 @@ internal static class Program
         finally { try { response.Close(); } catch { } }
     }
 
-    internal static async Task ClearCache(HttpListenerResponse response, RenderCache cache, SemaphoreSlim gate)
+    internal sealed record PlayerCacheResult(long Bytes, string Root);
+
+    internal static async Task ClearCache(HttpListenerResponse response, Func<Task<PlayerCacheResult>> clear, SemaphoreSlim gate)
     {
         // Share the render lock: never delete a frame being sent or cached,
         // including when another panel is using the bridge.
@@ -119,14 +121,27 @@ internal static class Program
         }
         try
         {
-            var cleared = cache.Clear();
-            var body = JsonSerializer.SerializeToUtf8Bytes(new { files = cleared.Files, bytes = cleared.Bytes });
+            var cleared = await clear();
+            var body = JsonSerializer.SerializeToUtf8Bytes(new { bytes = cleared.Bytes, root = cleared.Root });
             response.StatusCode = 200;
             response.ContentType = "application/json";
             response.ContentLength64 = body.Length;
             await response.OutputStream.WriteAsync(body);
         }
         finally { gate.Release(); }
+    }
+
+    private static async Task<PlayerCacheResult> ClearPlayerCache()
+    {
+        var player = ConfigValue("playerExePath");
+        if (string.IsNullOrWhiteSpace(player))
+            throw new IOException("The DLSS Video Player location is not saved. Close Photoshop and reinstall DLSS Neural Mix, selecting the player's EXE.");
+        var runner = RunnerPath();
+        var result = await RunProcess(runner, "--clear-player-cache " + Quote(player),
+            Path.GetDirectoryName(runner) ?? AppContext.BaseDirectory);
+        return JsonSerializer.Deserialize<PlayerCacheResult>(result,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new IOException("The player cache helper returned no result.");
     }
 
     private static async Task Render(HttpListenerContext context)
@@ -247,7 +262,7 @@ internal static class Program
         return BitConverter.ToString(hash.GetHashAndReset()).Replace("-", "");
     }
 
-    private static async Task RunProcess(string executable, string arguments, string workingDirectory)
+    private static async Task<string> RunProcess(string executable, string arguments, string workingDirectory)
     {
         using var process = new Process
         {
@@ -257,7 +272,9 @@ internal static class Program
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
-                RedirectStandardError = true
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
             }
         };
         if (!process.Start()) throw new IOException("Could not start " + Path.GetFileName(executable));
@@ -271,6 +288,7 @@ internal static class Program
         var details = (await stdout) + (await stderr);
         if (process.ExitCode != 0)
             throw new IOException(Path.GetFileName(executable) + " failed (" + process.ExitCode + "): " + details.Trim());
+        return await stdout;
     }
 
     private static async Task SendRgb(HttpListenerResponse response, string path, long length)
@@ -291,7 +309,10 @@ internal static class Program
         await response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
     }
 
-    private static string RunnerPath()
+    private static string RunnerPath() => ConfigValue("runnerPath") ??
+        Environment.GetEnvironmentVariable("DLSS_PHOTOSHOP_RUNNER") ?? "";
+
+    private static string? ConfigValue(string name)
     {
         // The installer writes a per-user path. Development builds can use a
         // config beside this executable instead.
@@ -304,9 +325,9 @@ internal static class Program
             if (File.Exists(config))
             {
                 using var document = JsonDocument.Parse(File.ReadAllText(config));
-                return document.RootElement.GetProperty("runnerPath").GetString()!;
+                return document.RootElement.TryGetProperty(name, out var value) ? value.GetString() : null;
             }
-        return Environment.GetEnvironmentVariable("DLSS_PHOTOSHOP_RUNNER") ?? "";
+        return null;
     }
 
     private static string Quote(string path) => "\"" + path.Replace("\"", "\\\"") + "\"";

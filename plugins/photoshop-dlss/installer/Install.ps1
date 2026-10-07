@@ -80,7 +80,7 @@ foreach ($name in @('LICENSE', 'THIRD_PARTY.md', 'EXPERIMENTAL_RUNTIME_NOTICE.tx
 
 $bridgeSettings = Join-Path $env:LOCALAPPDATA 'DLSSPhotoshopBridge'
 New-Item -ItemType Directory -Path $bridgeSettings -Force | Out-Null
-@{ runnerPath = (Join-Path $renderer 'DLSSPhotoshopNeural.exe') } |
+@{ runnerPath = (Join-Path $renderer 'DLSSPhotoshopNeural.exe'); playerExePath = (Join-Path $source 'DLSSVideoPlayer.exe') } |
     ConvertTo-Json -Compress |
     Set-Content -LiteralPath (Join-Path $bridgeSettings 'bridge-config.json') -Encoding UTF8
 

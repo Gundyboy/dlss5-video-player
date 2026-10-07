@@ -1,6 +1,7 @@
 param(
     [string]$RunnerPath = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path 'build-upscaling\Release\DLSSPhotoshopNeural.exe'),
-    [string]$DotnetPath
+    [string]$DotnetPath,
+    [string]$PlayerExePath = (Join-Path $env:USERPROFILE 'Desktop\DLSSVideoPlayer-v0.26.0-win64\DLSSVideoPlayer.exe')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,7 +27,7 @@ Get-ChildItem -LiteralPath $native -File |
 & $DotnetPath publish (Join-Path $PSScriptRoot 'bridge\DLSSPhotoshopBridge.csproj') -c Release -r win-x64 --self-contained true `
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o $native
 if ($LASTEXITCODE -ne 0) { throw 'Bridge build failed.' }
-@{ runnerPath = (Resolve-Path -LiteralPath $RunnerPath).Path } |
+@{ runnerPath = (Resolve-Path -LiteralPath $RunnerPath).Path; playerExePath = $PlayerExePath } |
     ConvertTo-Json -Compress |
     Set-Content -LiteralPath (Join-Path $native 'bridge-config.json') -Encoding UTF8
 Write-Output "UXP plugin ready: $PSScriptRoot"

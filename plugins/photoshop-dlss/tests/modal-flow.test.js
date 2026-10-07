@@ -295,14 +295,14 @@ controls.get("process").click().then(async () => {
   let finishClear;
   context.fetch = async (url, options) => {
     if (url.endsWith("/health")) return originalFetch(url);
-    assert.ok(url.endsWith("/cache/clear"));
+    assert.ok(url.endsWith("/player-cache/clear"));
     assert.equal(options.method, "POST");
     assert.equal(modalDepth, 0, "cache clearing must not acquire a Photoshop modal scope");
     for (const id of ["process", "pano", "clearCache"])
       assert.equal(controls.get(id).disabled, true, "all action buttons must be disabled during cache clearing");
     clears++;
     await new Promise(resolve => { finishClear = resolve; });
-    return { ok: true, status: 200, async json() { return { files: 2, bytes: 3 * 1024 * 1024 }; } };
+    return { ok: true, status: 200, async json() { return { root: "C:/Player/cache/v1", bytes: 3 * 1024 * 1024 }; } };
   };
   const clearing = controls.get("clearCache").click();
   while (!finishClear) await Promise.resolve();
@@ -311,16 +311,17 @@ controls.get("process").click().then(async () => {
   assert.equal(clears, 1, "busy clicks must not send another request");
   finishClear();
   await clearing;
-  assert.match(controls.get("status").textContent, /2 cached frames removed \(3\.0 MB freed\)/);
+  assert.match(controls.get("status").textContent, /DLSS Video Player cache cleared \(3\.0 MB freed\)/);
+  assert.ok(log.childNodes.some(entry => /C:\/Player\/cache\/v1/.test(entry.textContent)), "the activity log must identify the player cache directory");
   assert.ok(log.childNodes.some(entry => /Second panorama render failed/.test(entry.textContent)), "clearing frames must keep previous activity entries");
   for (const [code, message, expected] of [
-    [200, "", /already empty/],
-    [404, "Unknown bridge endpoint", /reinstall DLSS Neural Mix v0\.2\.12/],
+    [200, "", /0\.0 MB freed/],
+    [404, "Unknown bridge endpoint", /reinstall DLSS Neural Mix v0\.2\.13/],
     [409, "An image is still processing.", /still processing/],
     [500, "Access to the cache file is denied.", /Access to the cache file/]
   ]) {
     context.fetch = async url => url.endsWith("/health") ? originalFetch(url) :
-      { ok: code === 200, status: code, async json() { return { files: 0, bytes: 0 }; }, async text() { return message; } };
+      { ok: code === 200, status: code, async json() { return { root: "C:/Player/cache/v1", bytes: 0 }; }, async text() { return message; } };
     await controls.get("clearCache").click();
     assert.match(controls.get("status").textContent, expected);
     assert.equal(controls.get("status").dataset.state, code === 200 ? "done" : "error");

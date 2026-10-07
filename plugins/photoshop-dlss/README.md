@@ -50,10 +50,14 @@ RGB frames on disk, so changing Mix on the same unchanged regular layer or
 panorama does not invoke the model again. Cache keys include pixels, dimensions,
 runner/worker versions, and the rendering settings contents.
 
-**Clear cache** removes those cached frames, including files left from an earlier
-session, and reports the freed disk space in Progress and the activity log. The
-next Apply renders again. It keeps your Photoshop layers, settings, and logs.
-Cache clearing does not require an open document and cannot run during a render.
+**Clear cache** clears the **DLSS Video Player's** media cache using the same
+cache manager as the player's own command. Setup remembers the player EXE you
+select. The button reads its current Storage settings, including a custom cache
+directory or automatic portable/LocalAppData storage, and logs the cleared path
+and freed space. Close that player before clearing. Your Photoshop layers,
+original images, player settings/history, and the plugin's two cached Mix frames
+are kept. Clearing works without an open Photoshop document and cannot run during
+a plugin render. Reinstall and select the new EXE if you move the player folder.
 
 The panel reads RGB pixels at 8 bits per component. A layer must be at least
 64 × 64, no more than 8192 pixels on either side, and at most 64 megapixels.
@@ -103,6 +107,9 @@ the bridge on first use. Never include this test script in a release package.
 Run `dotnet run --project tests/cache-endpoint/CacheEndpoint.Tests.csproj` for
 cache clearing's HTTP response and render lock checks. It uses private temporary
 frames and a separate loopback listener without touching the installed cache.
+Run the player-cache PowerShell test in the tests folder after building the
+native runner to check normal/custom cache paths, active players and jobs,
+original preservation, and junction protection using temporary fixtures.
 
 After `Build-Installer.ps1`, run `node tests/bridge-pano-smoke.js` with the local
 renderer installed and no existing bridge running. It starts the rebuilt bridge

@@ -3,7 +3,7 @@ const { entrypoints, shell, storage } = require("uxp");
 
 // UXP's manifest allowlist rejects numeric loopback addresses in Photoshop.
 const endpoint = "http://localhost:47837";
-const panelVersion = "0.2.12";
+const panelVersion = "0.2.13";
 const fs = storage.localFileSystem;
 const slider = document.getElementById("mix");
 const number = document.getElementById("mixNumber");
@@ -516,16 +516,16 @@ async function clearRenderCache() {
   button.disabled = panoButton.disabled = clearCacheButton.disabled = true;
   clearCacheButton.textContent = "Clearing…";
   try {
-    setStatus("Clearing cached neural renders…");
+    setStatus("Clearing DLSS Video Player cache…");
     await ensureBridge();
-    const response = await fetch(endpoint + "/cache/clear", { method: "POST" });
+    const response = await fetch(endpoint + "/player-cache/clear", { method: "POST" });
     if (response.status === 404)
-      throw new Error("The running renderer needs updating. Close Photoshop and reinstall DLSS Neural Mix v0.2.12 or newer, then reopen Photoshop.");
+      throw new Error("The running renderer needs updating. Close Photoshop and reinstall DLSS Neural Mix v0.2.13 or newer, then reopen Photoshop.");
     if (!response.ok) throw new Error(await response.text());
     const cleared = await response.json();
     const megabytes = (cleared.bytes / (1024 * 1024)).toFixed(1);
-    setStatus(cleared.files === 0 ? "Cache is already empty." :
-      `Cache cleared: ${cleared.files} cached ${cleared.files === 1 ? "frame" : "frames"} removed (${megabytes} MB freed).`, "done");
+    appendLog("DLSS Video Player cache folder: " + cleared.root);
+    setStatus(`DLSS Video Player cache cleared (${megabytes} MB freed).`, "done");
   } catch (error) {
     setStatus("Could not clear cache: " + (error && error.message ? error.message : String(error)), "error");
     console.error(error);
