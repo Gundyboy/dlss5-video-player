@@ -7,3 +7,7 @@
 /tests/cache-endpoint/bin/
 /tests/cache-endpoint/obj/
 /.dotnet/
+/agent/bin/
+/agent/obj/
+/tests/agent-control/bin/
+/tests/agent-control/obj/

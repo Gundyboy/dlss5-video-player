@@ -8,5 +8,6 @@
   <ItemGroup>
     <Compile Include="../../bridge/Program.cs" Link="Bridge.cs" />
     <Compile Include="../../bridge/RenderCache.cs" Link="RenderCache.cs" />
+    <Compile Include="../../bridge/AgentControl.cs" Link="AgentControl.cs" />
   </ItemGroup>
 </Project>

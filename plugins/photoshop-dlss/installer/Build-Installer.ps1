@@ -13,10 +13,11 @@ $dist = Join-Path $plugin 'dist'
 $uxp = Join-Path $dist 'uxp'
 $setup = Join-Path $dist 'setup'
 $bridgeBuild = Join-Path $dist 'bridge-build'
+$agentBuild = Join-Path $dist 'agent-build'
 
 # Recreate generated staging folders so repeated builds cannot package stale files.
 $distPath = [IO.Path]::GetFullPath($dist)
-foreach ($stagePath in @($uxp, $setup, $bridgeBuild)) {
+foreach ($stagePath in @($uxp, $setup, $bridgeBuild, $agentBuild)) {
     $fullPath = [IO.Path]::GetFullPath($stagePath)
     if (-not $fullPath.StartsWith($distPath + [IO.Path]::DirectorySeparatorChar,
             [StringComparison]::OrdinalIgnoreCase)) {
@@ -47,6 +48,9 @@ $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
 & $DotnetPath publish (Join-Path $plugin 'bridge\DLSSPhotoshopBridge.csproj') -c Release -r win-x64 --self-contained true `
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o $bridgeBuild
 if ($LASTEXITCODE -ne 0) { throw 'The bridge build failed.' }
+& $DotnetPath publish (Join-Path $plugin 'agent\DLSSNeuralMixMcp.csproj') -c Release -r win-x64 --self-contained true `
+    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o $agentBuild
+if ($LASTEXITCODE -ne 0) { throw 'The agent MCP server build failed.' }
 
 # Only the open-source panel, bridge, neural runner and worker are packaged here.
 # The experimental neural runtime and FFmpeg are taken from the user's existing
@@ -82,6 +86,16 @@ Copy-Item -LiteralPath (Join-Path $repo 'packaging\ReShadePreset.ini') -Destinat
 Copy-Item -LiteralPath (Join-Path $repo 'packaging\runtime-lock.json') -Destination (Join-Path $setup 'payload\runtime-lock.json') -Force
 Copy-Item -LiteralPath (Join-Path $repo 'LICENSE') -Destination (Join-Path $setup 'payload\LICENSE') -Force
 Copy-Item -LiteralPath (Join-Path $repo 'THIRD_PARTY.md') -Destination (Join-Path $setup 'payload\THIRD_PARTY.md') -Force
+New-Item -ItemType Directory -Path (Join-Path $setup 'agent') -Force | Out-Null
+foreach ($file in Get-ChildItem -LiteralPath $agentBuild -File) {
+    if ($file.Extension -ne '.pdb') { Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $setup 'agent') -Force }
+}
+foreach ($name in @('README.md', 'Connect-Codex.ps1', 'THIRD_PARTY.md', 'MCP-LICENSE.txt')) {
+    Copy-Item -LiteralPath (Join-Path $plugin ('agent\' + $name)) -Destination (Join-Path $setup 'agent') -Force
+}
+foreach ($notice in @('LICENSE.txt', 'ThirdPartyNotices.txt')) {
+    Copy-Item -LiteralPath (Join-Path $dotnetRoot $notice) -Destination (Join-Path $setup ('agent\DOTNET-' + $notice)) -Force
+}
 
 if ($CcxFile) {
     if (-not (Test-Path -LiteralPath $CcxFile -PathType Leaf)) { throw "Missing .ccx: $CcxFile" }

@@ -7,7 +7,7 @@ Unicode True
 !include "FileFunc.nsh"
 
 !define PRODUCT "DLSS Neural Mix"
-!define VERSION "0.2.14"
+!define VERSION "0.2.15"
 !define STAGE "..\dist\setup"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\DLSSNeuralMix"
 
@@ -18,7 +18,7 @@ RequestExecutionLevel user
 ShowInstDetails show
 ShowUninstDetails show
 SetCompressor /SOLID lzma
-VIProductVersion "0.2.14.0"
+VIProductVersion "0.2.15.0"
 VIAddVersionKey "ProductName" "${PRODUCT}"
 VIAddVersionKey "FileDescription" "${PRODUCT} setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
@@ -57,6 +57,8 @@ Function .onInit
   File "${STAGE}\payload\runtime-lock.json"
   File "${STAGE}\payload\LICENSE"
   File "${STAGE}\payload\THIRD_PARTY.md"
+  SetOutPath "$PLUGINSDIR\agent"
+  File /r "${STAGE}\agent\*"
 FunctionEnd
 
 Function SelectPlayerPage

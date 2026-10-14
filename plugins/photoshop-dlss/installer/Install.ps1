@@ -21,6 +21,7 @@ if ($PlayerExePath) {
 }
 $package = Join-Path $PSScriptRoot 'DLSS-Neural-Mix.ccx'
 $payload = Join-Path $PSScriptRoot 'payload'
+$agentPayload = Join-Path $PSScriptRoot 'agent'
 $runner = Join-Path $payload 'DLSSPhotoshopNeural.exe'
 $worker = Join-Path $payload 'NeuralWorker.exe'
 $reshadeSettings = Join-Path $payload 'ReShade.ini'
@@ -29,7 +30,7 @@ $lockPath = Join-Path $payload 'runtime-lock.json'
 $programFiles64 = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
 $upia = Join-Path $programFiles64 'Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe'
 
-foreach ($item in @($package, $runner, $worker, $reshadeSettings, $reshadePreset, $lockPath, $upia)) {
+foreach ($item in @($package, $runner, $worker, $reshadeSettings, $reshadePreset, $lockPath, $upia, (Join-Path $agentPayload 'DLSSNeuralMixMcp.exe'))) {
     if (-not (Test-Path -LiteralPath $item -PathType Leaf)) { throw "Installer file missing: $item" }
 }
 $identity = Get-DlssPackageIdentity -Package $package
@@ -91,7 +92,27 @@ if ($LASTEXITCODE -ne 0) { throw "Adobe UPIA installation failed with exit code 
 Stop-DlssBridgeForUpgrade
 Move-ObsoleteDlssPlugins -ExternalRoot (Join-Path $env:APPDATA 'Adobe\UXP\Plugins\External') `
     -BackupRoot (Join-Path $installRoot 'PluginBackups') -Identity $identity
+$agentDirectory = Join-Path $installRoot 'Agent'
+New-Item -ItemType Directory -Path $agentDirectory -Force | Out-Null
+foreach ($agentFile in Get-ChildItem -LiteralPath $agentPayload -File) {
+    $agentTarget = Join-Path $agentDirectory $agentFile.Name
+    if ((Test-Path -LiteralPath $agentTarget -PathType Leaf) -and
+        (Get-FileHash -LiteralPath $agentTarget).Hash -eq (Get-FileHash -LiteralPath $agentFile.FullName).Hash) { continue }
+    if ($agentFile.Name -eq 'DLSSNeuralMixMcp.exe') {
+        foreach ($process in Get-CimInstance Win32_Process -Filter "Name='DLSSNeuralMixMcp.exe'") {
+            if ($process.ExecutablePath -and $process.ExecutablePath -ieq $agentTarget) {
+                $ownedProcess = Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue
+                if ($ownedProcess) {
+                    Stop-Process -InputObject $ownedProcess -Force
+                    if (-not $ownedProcess.WaitForExit(10000)) { throw 'The previous DLSS agent server did not stop. Close its MCP client and retry setup.' }
+                }
+            }
+        }
+    }
+    Copy-Item -LiteralPath $agentFile.FullName -Destination $agentTarget -Force
+}
 Write-Output "DLSS Neural Mix v$($identity.Version) installed. Start Photoshop, then open Plugins > DLSS Neural Mix."
+Write-Output "Agent MCP server: $(Join-Path $agentDirectory 'DLSSNeuralMixMcp.exe'). Run Agent\Connect-Codex.ps1 to connect Codex."
 } catch {
     Write-Output ('ERROR: ' + $_.Exception.Message)
     exit 1

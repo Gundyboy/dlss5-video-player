@@ -3,7 +3,7 @@ const { entrypoints, shell, storage } = require("uxp");
 
 // UXP's manifest allowlist rejects numeric loopback addresses in Photoshop.
 const endpoint = "http://localhost:47837";
-const panelVersion = "0.2.14";
+const panelVersion = "0.2.15";
 const fs = storage.localFileSystem;
 const slider = document.getElementById("mix");
 const number = document.getElementById("mixNumber");
@@ -15,8 +15,9 @@ const log = document.getElementById("log");
 let busy = false;
 let progress = null;
 let panoEnabled = false;
+let agentControl = null;
 
-entrypoints.setup({ panels: { dlssNeuralMix: { show() {} } } });
+entrypoints.setup({ panels: { dlssNeuralMix: { show() { startAgentControl(); }, destroy() { stopAgentControl(); } } } });
 
 function appendLog(message, state = "normal") {
   const followTail = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
@@ -119,10 +120,13 @@ number.addEventListener("change", () => {
 });
 panoButton.addEventListener("click", () => {
   if (busy) return;
-  panoEnabled = !panoEnabled;
+  setPano(!panoEnabled);
+});
+function setPano(value) {
+  panoEnabled = value;
   panoButton.textContent = panoEnabled ? "Pano: On" : "Pano: Off";
   panoButton.setAttribute("aria-pressed", String(panoEnabled));
-});
+}
 
 async function bridgeVersion() {
   try {
@@ -138,7 +142,7 @@ async function bridgeVersion() {
 async function ensureBridge() {
   appendLog("Checking local renderer bridge");
   const runningVersion = await bridgeVersion();
-  if (runningVersion === 3) {
+  if (runningVersion === 4) {
     appendLog("Renderer bridge connected");
     return;
   }
@@ -155,7 +159,7 @@ async function ensureBridge() {
   if (result) throw new Error("Could not start the local bridge: " + result);
   for (let attempt = 0; attempt < 40; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 250));
-    if (await bridgeVersion() === 3) {
+    if (await bridgeVersion() === 4) {
       appendLog("Renderer bridge connected");
       return;
     }
@@ -325,10 +329,11 @@ async function convertActiveToSmartObject(document, layerId, name) {
   const smart = document.activeLayers[0];
   if (!smart) throw new Error("Photoshop did not return the new Smart Object.");
   smart.name = name;
+  return smart.id;
 }
 
 async function insertResult(documentId, sourceId, pixels, width, height, bounds, name) {
-  await core.executeAsModal(async () => {
+  return await core.executeAsModal(async () => {
     const current = app.activeDocument;
     if (!current || current.id !== documentId ||
         current.activeLayers.length !== 1 || current.activeLayers[0].id !== sourceId)
@@ -350,7 +355,7 @@ async function insertResult(documentId, sourceId, pixels, width, height, bounds,
         replace: true
       });
       await layer.move(source, constants.ElementPlacement.PLACEBEFORE);
-      await convertActiveToSmartObject(current, layer.id, name);
+      return await convertActiveToSmartObject(current, layer.id, name);
     } finally {
       imageData.dispose();
     }
@@ -358,13 +363,13 @@ async function insertResult(documentId, sourceId, pixels, width, height, bounds,
 }
 
 async function duplicateAtZero(documentId, sourceId, name) {
-  await core.executeAsModal(async () => {
+  return await core.executeAsModal(async () => {
     const current = app.activeDocument;
     if (!current || current.id !== documentId ||
         current.activeLayers.length !== 1 || current.activeLayers[0].id !== sourceId)
       throw new Error("The selected document or layer changed.");
     const copy = await current.activeLayers[0].duplicate();
-    await convertActiveToSmartObject(current, copy.id, name);
+    return await convertActiveToSmartObject(current, copy.id, name);
   }, { commandName: name });
 }
 
@@ -495,27 +500,39 @@ async function renderPanorama(rgb, width, height) {
   return blendPanoramaSeam(neural, offsetNeural, width, height, offset);
 }
 
-async function processSelectedLayer() {
-  if (busy) return;
+async function processSelectedLayer(settings) {
+  if (busy) return { ok: false, error: "Photoshop is already processing. Wait for the current job." };
   busy = true;
   button.disabled = true;
   panoButton.disabled = true;
   clearCacheButton.disabled = true;
   button.textContent = "Processing selected layer…";
   try {
-    await finishActiveToolEdit();
-    const mix = clampMix(number.value);
-    const usePano = panoEnabled;
-    number.value = slider.value = String(mix);
+    // Pin selection before the first await. A later change rejects capture or
+    // placement instead of applying an agent command to a different layer.
     const { document, layer } = selectedLayer();
+    if (settings) {
+      if (!Number.isInteger(settings.mix) || settings.mix < 0 || settings.mix > 200 || typeof settings.pano !== "boolean")
+        throw new Error("Agent settings require Mix 0–200 and Pano true or false.");
+      number.value = slider.value = String(settings.mix);
+      setPano(settings.pano);
+    }
+    const mix = settings ? settings.mix : clampMix(number.value);
+    const usePano = settings ? settings.pano : panoEnabled;
+    await finishActiveToolEdit();
+    const selected = selectedLayer();
+    if (selected.document.id !== document.id || selected.layer.id !== layer.id)
+      throw new Error("The selected document or layer changed before Apply.");
+    number.value = slider.value = String(mix);
     const name = `DLSS - ${mix}% Mix`;
+    const result = resultLayerId => ({ ok: true, documentId: document.id, sourceLayerId: layer.id, resultLayerId, name, mix, pano: usePano });
     appendLog(`Selected layer: ${layer.name} (${layer.kind})`);
     if (usePano) appendLog("Pano enabled: protect the horizontal wrap seam with two views.");
     if (mix === 0) {
       setStatus("Creating Smart Object…");
-      await duplicateAtZero(document.id, layer.id, name);
+      const resultLayerId = await duplicateAtZero(document.id, layer.id, name);
       setStatus(`Done: ${name}`, "done");
-      return;
+      return result(resultLayerId);
     }
 
     setStatus("Reading selected layer…");
@@ -534,11 +551,13 @@ async function processSelectedLayer() {
     setStatus("Mixing rendered and original pixels…");
     const output = composePixels(source, neural, components, mix, pixelCount);
     setStatus("Adding Smart Object…");
-    await insertResult(document.id, layer.id, output, width, height, captured.bounds, name);
+    const resultLayerId = await insertResult(document.id, layer.id, output, width, height, captured.bounds, name);
     setStatus(`Done: ${name}`, "done");
+    return result(resultLayerId);
   } catch (error) {
     setStatus("Failed: " + (error && error.message ? error.message : String(error)), "error");
     console.error(error);
+    return { ok: false, error: error && error.message ? error.message : String(error) };
   } finally {
     stopProgress();
     busy = false;
@@ -549,7 +568,7 @@ async function processSelectedLayer() {
   }
 }
 
-button.addEventListener("click", processSelectedLayer);
+button.addEventListener("click", () => processSelectedLayer());
 
 async function clearRenderCache() {
   if (busy) return;
@@ -561,7 +580,7 @@ async function clearRenderCache() {
     await ensureBridge();
     const response = await fetch(endpoint + "/player-cache/clear", { method: "POST" });
     if (response.status === 404)
-      throw new Error("The running renderer needs updating. Close Photoshop and reinstall DLSS Neural Mix v0.2.14 or newer, then reopen Photoshop.");
+      throw new Error("The running renderer needs updating. Close Photoshop and reinstall DLSS Neural Mix v0.2.15 or newer, then reopen Photoshop.");
     if (!response.ok) throw new Error(await response.text());
     const cleared = await response.json();
     const megabytes = (cleared.bytes / (1024 * 1024)).toFixed(1);
@@ -578,3 +597,82 @@ async function clearRenderCache() {
 }
 
 clearCacheButton.addEventListener("click", clearRenderCache);
+
+function agentState() {
+  const current = app.activeDocument;
+  const layers = current ? current.activeLayers : [];
+  return { busy, documentId: current ? current.id : null, layerId: layers.length === 1 ? layers[0].id : null,
+    selectedLayers: layers.length, mix: clampMix(number.value), pano: panoEnabled, version: panelVersion };
+}
+async function agentFetch(current, path, body) {
+  const headers = { "Content-Type": "application/json", "X-DLSS-Agent": "1" };
+  if (current.token) headers.Authorization = "Bearer " + current.token;
+  const response = await fetch(endpoint + path, { method: "POST", headers, body: JSON.stringify(body) });
+  const data = await response.json();
+  if (!response.ok) {
+    const error = new Error(data.error || "Agent connection failed.");
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+function stopAgentControl() {
+  if (!agentControl) return;
+  agentControl.active = false;
+  clearInterval(agentControl.heartbeat);
+  agentControl = null;
+}
+function startAgentControl() {
+  if (agentControl) return;
+  const current = { active: true, token: null, session: null, completion: null, lastError: null,
+    instance: "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+      const n = Math.floor(Math.random() * 16); return (c === "x" ? n : (n & 3) | 8).toString(16);
+    }) };
+  agentControl = current;
+  // Heartbeats keep a running job reserved across long neural renders. Idle
+  // panels use one long poll, not a rapid polling timer.
+  current.heartbeat = setInterval(async () => {
+    if (!current.active || !current.session || !busy || current.heartbeating) return;
+    current.heartbeating = true;
+    try { await agentFetch(current, "/agent/poll", { session: current.session, state: agentState(), wait: false }); }
+    catch (_) { /* The main loop reconnects and delivers the retained result. */ }
+    finally { current.heartbeating = false; }
+  }, 5000);
+  (async () => {
+    while (current.active) {
+      try {
+        if (!current.session) {
+          await ensureBridge();
+          const connected = await agentFetch(current, "/agent/connect", { instance: current.instance });
+          current.token = connected.token; current.session = connected.session;
+          appendLog("Agent control connected. Mix, Pano and Apply are available to local agents.");
+        }
+        const data = await agentFetch(current, "/agent/poll", {
+          session: current.session, state: agentState(), completion: current.completion, wait: !busy
+        });
+        current.lastError = null;
+        if (current.completion && data.acknowledged === current.completion.id) current.completion = null;
+        if (!current.active) break;
+        if (data.job) {
+          appendLog(`Agent Apply: ${data.job.mix}% Mix · Pano ${data.job.pano ? "On" : "Off"}`);
+          let result;
+          try { result = await processSelectedLayer({ mix: data.job.mix, pano: data.job.pano }); }
+          catch (error) { result = { ok: false, error: String(error) }; }
+          // Retain completion until the bridge acknowledges it. A failed HTTP
+          // response never repeats Photoshop Apply or creates a second object.
+          current.completion = { id: data.job.id, result };
+        } else if (busy) await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (error) {
+        if (!current.active) break;
+        if (error.status === 401 || error.status === 409) current.session = null;
+        if (error.status === 404 && current.completion) {
+          appendLog("The bridge lost this agent job after processing. Its Photoshop result is retained; Apply will not be repeated.", "error");
+          current.completion = null; current.session = null;
+        }
+        const message = "Agent control unavailable: " + String(error);
+        if (current.lastError !== message) { appendLog(message, "error"); current.lastError = message; }
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+    }
+  })().catch(error => { appendLog("Agent control stopped: " + String(error), "error"); stopAgentControl(); });
+}

@@ -47,7 +47,7 @@ vm.runInNewContext(fs.readFileSync(path.join(pluginRoot, "panel.js"), "utf8"), c
       try {
         const response = await fetch(endpoint + "/health", { signal: AbortSignal.timeout(1000) });
         if (response.ok) {
-          assert.equal(response.headers.get("X-DLSS-Bridge"), "3");
+          assert.equal(response.headers.get("X-DLSS-Bridge"), "4");
           connected = true;
           break;
         }

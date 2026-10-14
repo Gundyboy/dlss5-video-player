@@ -30,7 +30,17 @@ try {
     }
     $worker = Join-Path $renderer 'neural-runtime\NeuralWorker.exe'
     if (Test-Path -LiteralPath $worker -PathType Leaf) { Remove-Item -LiteralPath $worker -Force }
+    $agentDirectory = Join-Path $env:LOCALAPPDATA 'DLSSNeuralMix\Agent'
+    $agentExe = Join-Path $agentDirectory 'DLSSNeuralMixMcp.exe'
+    foreach ($process in Get-CimInstance Win32_Process -Filter "Name='DLSSNeuralMixMcp.exe'") {
+        if ($process.ExecutablePath -and $process.ExecutablePath -ieq $agentExe) { Stop-Process -Id $process.ProcessId -Force }
+    }
+    foreach ($name in @('DLSSNeuralMixMcp.exe', 'README.md', 'Connect-Codex.ps1', 'THIRD_PARTY.md', 'MCP-LICENSE.txt', 'DOTNET-LICENSE.txt', 'DOTNET-ThirdPartyNotices.txt')) {
+        $file = Join-Path $agentDirectory $name
+        if (Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file -Force }
+    }
     Write-Output 'DLSS Neural Mix removed. Saved settings and cache were retained.'
+    Write-Output 'If you connected Codex, remove its registration with: codex mcp remove dlss-neural-mix'
 } catch {
     Write-Output ('ERROR: ' + $_.Exception.Message)
     exit 1

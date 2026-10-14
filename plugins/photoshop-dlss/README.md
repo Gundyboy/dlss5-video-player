@@ -75,6 +75,17 @@ preserved. Recovery does not clear the video player's cache. A missing linked
 source may still need to be relinked in Photoshop. The layer name and type appear in the
 activity log to help diagnose document-specific failures.
 
+## Agent control
+
+v0.2.15 exposes Mix (0–200), Pano (Boolean), and Apply through the existing
+loopback bridge. The self-contained MCP server provides `dlss_apply` and the
+read-only `dlss_status`; see [agent setup](agent/README.md). The loaded Photoshop
+panel executes the same Apply routine, returns the source/result layer IDs,
+and retains a completion until the bridge acknowledges it. A lost response
+does not repeat Apply. Job records expire on bridge restart; an unknown result
+must be checked before another Apply. The renderer's known high-resolution
+brightness limitation is unchanged.
+
 ## Local development
 
 1. Build the `DLSSPhotoshopNeural` CMake target. It builds `NeuralWorker` too.

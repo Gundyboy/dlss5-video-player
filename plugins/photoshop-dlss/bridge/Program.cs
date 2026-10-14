@@ -10,15 +10,16 @@ using System.Threading.Tasks;
 
 internal static class Program
 {
-    private const int Port = 47837;
+    private static readonly int Port = int.TryParse(Environment.GetEnvironmentVariable("DLSS_NEURAL_MIX_PORT"), out var port) && port > 0 && port <= 65535 ? port : 47837;
     private const long MaxPixels = 64_000_000;
-    private static readonly string WorkRoot = Path.Combine(
+    private static readonly string WorkRoot = Environment.GetEnvironmentVariable("DLSS_NEURAL_MIX_HOME") ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "DLSSPhotoshopBridge");
     private static readonly RenderCache Frames = new(WorkRoot);
     private static readonly SemaphoreSlim RenderGate = new(1, 1);
     private static int rendering;
     private static string phase = "idle";
+    private static AgentControl? agents;
 
     private static async Task<int> Main()
     {
@@ -31,6 +32,7 @@ internal static class Program
             Log("Could not start listener: " + error);
             return 1;
         }
+        agents = AgentControl.Create(WorkRoot);
         Log("Bridge ready on loopback port " + Port);
         while (true)
         {
@@ -50,10 +52,15 @@ internal static class Program
         response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
         response.Headers["Access-Control-Allow-Headers"] = "Content-Type, X-Width, X-Height";
         response.Headers["Access-Control-Expose-Headers"] = "X-DLSS-Bridge, X-DLSS-Cache";
-        response.Headers["X-DLSS-Bridge"] = "3";
+        response.Headers["X-DLSS-Bridge"] = "4";
         try
         {
             var path = context.Request.Url?.AbsolutePath;
+            if (path?.StartsWith("/agent/", StringComparison.Ordinal) == true)
+            {
+                await agents!.Handle(context, Volatile.Read(ref rendering) != 0);
+                return;
+            }
             if (context.Request.HttpMethod == "OPTIONS")
             {
                 response.StatusCode = 204;

@@ -216,7 +216,7 @@ const context = {
   async fetch(url) {
     assert.ok(url.startsWith("http://localhost:47837/"), "UXP needs the allowlisted localhost hostname");
     if (url.endsWith("/health"))
-      return { ok: true, headers: { get() { return "3"; } } };
+      return { ok: true, headers: { get() { return "4"; } } };
     if (url.endsWith("/render")) {
       assert.equal(controls.get("clearCache").disabled, true, "cache clearing must be disabled throughout rendering");
       assert.equal(modalDepth, 0, "neural rendering must not hold Photoshop modal");
@@ -404,7 +404,7 @@ controls.get("process").click().then(async () => {
   assert.ok(log.childNodes.some(entry => /Second panorama render failed/.test(entry.textContent)), "clearing frames must keep previous activity entries");
   for (const [code, message, expected] of [
     [200, "", /0\.0 MB freed/],
-    [404, "Unknown bridge endpoint", /reinstall DLSS Neural Mix v0\.2\.14/],
+    [404, "Unknown bridge endpoint", /reinstall DLSS Neural Mix v0\.2\.15/],
     [409, "An image is still processing.", /still processing/],
     [500, "Access to the cache file is denied.", /Access to the cache file/]
   ]) {
@@ -420,5 +420,58 @@ controls.get("process").click().then(async () => {
   await assert.rejects(context.ensureBridge(), /Photoshop blocked the local renderer connection/);
   context.fetch = async () => { throw new Error("Connection refused"); };
   assert.equal(await context.bridgeVersion(), 0, "An offline bridge should trigger startup");
+  context.fetch = originalFetch;
+  photoshop.app.activeDocument = document;
+  document.activeLayers = [original];
+  layeredReadFails = false; failSourceRaster = false;
+  const beforeAgentRenders = renders;
+  const agentResult = await context.processSelectedLayer({ mix: 100, pano: true });
+  assert.equal(agentResult.ok, true);
+  assert.equal(agentResult.documentId, document.id);
+  assert.equal(agentResult.sourceLayerId, original.id);
+  assert.equal(agentResult.resultLayerId, document.activeLayers[0].id);
+  assert.equal(agentResult.name, "DLSS - 100% Mix");
+  assert.equal(renders, beforeAgentRenders + 2, "Agent Pano must run both seam views");
+  assert.equal(controls.get("pano")["aria-pressed"], "true");
+  assert.equal(controls.get("mixNumber").value, "100");
+  document.activeLayers = [original];
+  const invalidAgent = await context.processSelectedLayer({ mix: 201, pano: false });
+  assert.equal(invalidAgent.ok, false);
+  assert.equal(renders, beforeAgentRenders + 2, "Invalid agent settings must not render");
+  const zeroAgent = await context.processSelectedLayer({ mix: 0, pano: false });
+  assert.equal(zeroAgent.ok, true);
+  assert.equal(zeroAgent.name, "DLSS - 0% Mix");
+  assert.equal(zeroAgent.resultLayerId, document.activeLayers[0].id);
+  photoshop.app.activeDocument = null;
+  assert.equal((await context.processSelectedLayer({ mix: 100, pano: false })).ok, false);
+  photoshop.app.activeDocument = document;
+  document.activeLayers = [original];
+  const agentJob = "91c9bd13a74949bc994c9c3cd933ab11c";
+  let agentPolls = 0, completeAgentLoop;
+  const agentLoopDone = new Promise(resolve => { completeAgentLoop = resolve; });
+  const rendersBeforeLoop = renders;
+  context.setTimeout = callback => setTimeout(callback, 0);
+  context.fetch = async (url, options) => {
+    if (!url.includes("/agent/")) return originalFetch(url, options);
+    assert.equal(options.headers["X-DLSS-Agent"], "1");
+    if (url.endsWith("/agent/connect")) {
+      assert.match(JSON.parse(options.body).instance, /^[a-f0-9-]{36}$/);
+      return { ok: true, async json() { return { token: "private-token", session: "private-session" }; } };
+    }
+    assert.equal(options.headers.Authorization, "Bearer private-token");
+    const message = JSON.parse(options.body);
+    agentPolls++;
+    if (agentPolls === 1) return { ok: true, async json() { return { job: { id: agentJob, mix: 100, pano: false } }; } };
+    assert.equal(message.completion.id, agentJob);
+    assert.equal(message.completion.result.ok, true);
+    assert.equal(message.completion.result.sourceLayerId, original.id);
+    if (agentPolls === 2) throw new Error("Lost completion acknowledgement");
+    context.stopAgentControl(); completeAgentLoop();
+    return { ok: true, async json() { return { acknowledged: agentJob, job: null }; } };
+  };
+  context.startAgentControl();
+  await agentLoopDone;
+  assert.equal(agentPolls, 3, "Failed acknowledgement must be delivered again");
+  assert.equal(renders, rendersBeforeLoop + 1, "Lost acknowledgement must never repeat Apply");
   console.log("Modal capture, Pano/Mix rendering, cache clearing, failure cleanup, Smart Object insertion, and bridge permissions passed.");
 }).catch(error => { console.error(error); process.exitCode = 1; });
